@@ -95,7 +95,7 @@ class GridFieldGroupable
 
         Requirements::javascript($moduleDir.'/js/groupable.js');
         Requirements::css($moduleDir.'/css/groupable.css');
-		
+
 	}
 
 	public function getURLHandlers($grid) {
@@ -110,11 +110,11 @@ class GridFieldGroupable
 	public function getHTMLFragments($field) {
 
         if( ! $field->getConfig()->getComponentByType('GridFieldOrderableRows')) {
-            user_error("GridFieldGroupable requires a GridFieldOrderableRows component", E_USER_WARNING);
+            return;
         }
-        
+
         self::include_requirements();
-        
+
         // set ajax urls / vars
 		$field->addExtraClass('ss-gridfield-groupable');
 		$field->setAttribute('data-url-group-assignment', $field->Link('group_assignment'));
@@ -125,7 +125,7 @@ class GridFieldGroupable
 		$field->setAttribute('data-groupable-groups', json_encode( $this->getOption('groupsAvailable') ) );
 
 	}
-    
+
 	/**
 	 * Handles requests to assign a new block area to a block item
 	 *
@@ -135,7 +135,7 @@ class GridFieldGroupable
 	 */
 	public function handleGroupAssignment($grid, $request) {
 		$list = $grid->getList();
-        
+
         // (copied from GridFieldOrderableRows::handleReorder)
 		$modelClass = $grid->getModelClass();
 		if ($list instanceof ManyManyList && !singleton($modelClass)->canView()) {
@@ -170,7 +170,7 @@ class GridFieldGroupable
         }
 
         $this->extend('onAfterAssignGroupItems', $list);
-        
+
         // Forward the request to GridFieldOrderableRows::handleReorder (if GridFieldOrderableRows)
         $orderableRowsComponent = $grid->getConfig()->getComponentByType('GridFieldOrderableRows');
         if($orderableRowsComponent) {
