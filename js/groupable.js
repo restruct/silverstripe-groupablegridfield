@@ -37,7 +37,7 @@
                 if(noGroupName){ this.setNoGroupName( noGroupName ); }
 
                 var groups = self.getGridField().data('groupable-groups'); // valid json, already parsed by jQ
-                if(Object.keys( groups ).length){
+                if(groups !== null && Object.keys( groups ).length){
                     groups.none = this.getNoGroupName();
                 } else {
                     return; // don't add headers if we have no groups defined
