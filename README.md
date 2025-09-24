@@ -7,6 +7,8 @@ It bolts on top of- and depends on GridFieldOrderableRows for the drag & drop so
 Allows adding new 'groups' on the fly when configured with a MultiValueField to store them.  
 Groups themselves can also be reordered (drag-drop, experimental). 
 
+<img width="784" height="559" alt="groupable" src="https://github.com/user-attachments/assets/caeca7e8-cc46-4c5d-9b54-93d92f4ba6a6" />
+
 ## NOTE: currently slightly 'WIP'
 We found a (Silverstripe 3) project in which quite a lot of development was done on this module which never got published (a.o. group reordering). These updates + additions have now been included + updated in this module but may still need a bit of work/debugging.
 - **Updated namespace** `micsck\GroupableGridfield` -> `Restruct\Silverstripe\Gridfield`
