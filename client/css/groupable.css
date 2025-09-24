@@ -1,0 +1,32 @@
+.cms .text-fade {
+  color: #aaa;
+}
+.cms .ss-gridfield-orderable tr.groupable-bound .col-reorder .handle {
+  padding: 14px 0 10px;
+}
+.cms table.grid-field__table tr.groupable-bound {
+  background: repeating-linear-gradient(90deg, #dbe0e9, #dbe0e9 1px, transparent 1px, transparent 2px);
+}
+.cms table.grid-field__table tr.groupable-bound:hover {
+  background: repeating-linear-gradient(90deg, #dbe0e9, #dbe0e9 1px, #f0f4f7 1px, #f0f4f7 2px);
+}
+.cms table.grid-field__table tr.groupable-bound td {
+  padding-top: 1rem;
+  padding-bottom: 1rem;
+  cursor: default;
+}
+.cms table.grid-field__table tr.groupable-bound td .boundary-indicator {
+  font-size: 130%;
+}
+.cms table.grid-field__table tr.groupable-bound td input.text {
+  width: 32em;
+  display: inline;
+}
+.cms table.grid-field__table tr.groupable-bound td span.alert {
+  padding: 0.5rem;
+}
+.cms table.grid-field__table tr.groupable-bound .groupable-data-hidden {
+  display: none;
+}
+
+/*# sourceMappingURL=groupable.css.map */

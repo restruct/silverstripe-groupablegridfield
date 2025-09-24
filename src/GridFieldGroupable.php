@@ -1,85 +1,103 @@
 <?php
 
-namespace micschk\GroupableGridfield;
+namespace Restruct\Silverstripe\GroupableGridfield;
 
 use Exception;
+use SilverStripe\Control\Controller;
+use SilverStripe\Control\HTTPRequest;
 use SilverStripe\Control\RequestHandler;
 use SilverStripe\Core\ClassInfo;
+use SilverStripe\Forms\GridField\GridField;
 use SilverStripe\Forms\GridField\GridField_ColumnProvider;
 use SilverStripe\Forms\GridField\GridField_HTMLProvider;
+use SilverStripe\Forms\GridField\GridField_SaveHandler;
 use SilverStripe\Forms\GridField\GridField_URLHandler;
+use SilverStripe\Forms\HiddenField;
 use SilverStripe\ORM\DataList;
+use SilverStripe\ORM\DataObject;
+use SilverStripe\ORM\DataObjectInterface;
 use SilverStripe\ORM\ManyManyList;
+use SilverStripe\View\ArrayData;
 use SilverStripe\View\Requirements;
 use Symbiote\GridFieldExtensions\GridFieldOrderableRows;
+use Symbiote\MultiValueField\Fields\KeyValueField;
 
-/**
- * Class GridFieldGroupable
- * @package micschk\GroupableGridfield
- */
 class GridFieldGroupable
     extends RequestHandler
     implements GridField_HTMLProvider,
-    GridField_ColumnProvider,
-    GridField_URLHandler
+        GridField_ColumnProvider,
+        GridField_URLHandler,
+        GridField_SaveHandler
 {
 
-    /**
-     * @var array
-     */
-    private static $allowed_actions = array(
+    private static $allowed_actions = [
         'handleGroupAssignment',
-    );
+    ];
 
     /**
-     * The database field which specifies the sort, defaults to "Sort".
+     * The field on subjects to hold group key
      *
-     * @see setSortField()
-     * @var string
-     */
-    protected $groupUnassignedName;
-
-    /**
-     * The database field which specifies the sort, defaults to "Sort".
-     *
-     * @see setSortField()
-     * @var string
-     */
-    protected $groupFieldLabel;
-
-    /**
-     * The database field which specifies the sort, defaults to "Sort".
-     *
-     * @see setSortField()
      * @var string
      */
     protected $groupField;
 
     /**
-     * The database field which specifies the sort, defaults to "Sort".
+     * The label for field on subjects to hold group key
      *
-     * @see setSortField()
      * @var string
+     */
+    protected $groupFieldLabel;
+
+    /**
+     * fallback/unassigned group name
+     *
+     * @var string
+     */
+    protected $groupUnassignedName;
+
+    /**
+     * The list of available groups (key/value) or null if providing $groupsFieldNameOnSource
+     *
+     * @var array
      */
     protected $groupsAvailable;
 
     /**
-     * @param string $groupField
-     * @param string $groupFieldLabel
-     * @param string $groupUnassignedName
-     * @param array $groupsAvailable
+     * The database field on the source record which provides the groups (MultiValueField)
+     *
+     * @see setSortField()
+     * @var string
+     */
+    protected $groupsFieldOnSource;
+
+    /**
+     * The row template to render this with
+     *
+     * @var string
+     */
+    protected $dividerTemplate = 'GFGroupableDivider';
+
+    /**
+     * @param string $groupField field on subjects to hold group key
+     * @param string $groupFieldLabel label for field on subjects to hold group key
+     * @param string $groupUnassignedName fallback/unassigned group name
+     * @param array $groupsAvailable list of groups (key value)
+     * @param string $groupsFieldOnSource MultiValue field on source record to provide groups
      */
     public function __construct(
-        $groupField = 'Group',
+        $groupFieldOnSubject = 'Group',
         $groupFieldLabel = 'Group',
         $groupUnassignedName = '[none/inactive]',
-        $groupsAvailable = array()
-    ) {
+        $groupsAvailable = [],
+        $groupsFieldOnSource = null
+    )
+    {
         parent::__construct();
-        $this->groupField = $groupField;
+        $this->groupField = $groupFieldOnSubject;
         $this->groupFieldLabel = $groupFieldLabel;
         $this->groupUnassignedName = $groupUnassignedName;
         $this->groupsAvailable = $groupsAvailable;
+        $this->groupsFieldOnSource = $groupsFieldOnSource;
     }
 
     /**
@@ -110,51 +128,67 @@ class GridFieldGroupable
      */
     public static function include_requirements()
     {
-        Requirements::javascript('micschk/silverstripe-groupable-gridfield: js/groupable.js');
-        Requirements::css('micschk/silverstripe-groupable-gridfield: css/groupable.css');
+        Requirements::javascript('symbiote/silverstripe-gridfieldextensions:javascript/tmpl.js');
+        Requirements::javascript('restruct/silverstripe-groupable-gridfield:client/js/groupable.js');
+        Requirements::css('restruct/silverstripe-groupable-gridfield:client/css/groupable.css');
 
     }
 
     public function getURLHandlers($grid)
     {
-        return array(
+        return [
             'POST group_assignment' => 'handleGroupAssignment',
-        );
+        ];
     }
 
     /**
-     * @param \SilverStripe\Forms\GridField\GridField $field
+     * @param GridField $field
      */
-    public function getHTMLFragments($field)
+    public function getHTMLFragments($grid)
     {
 
-        if (!$field->getConfig()->getComponentByType(GridFieldOrderableRows::class)) {
+        if (!$grid->getConfig()->getComponentByType(GridFieldOrderableRows::class)) {
             user_error("GridFieldGroupable requires a GridFieldOrderableRows component", E_USER_WARNING);
         }
 
         self::include_requirements();
 
         // set ajax urls / vars
-        $field->addExtraClass('ss-gridfield-groupable');
-        $field->setAttribute('data-url-group-assignment', $field->Link('group_assignment'));
+        $grid->addExtraClass('ss-gridfield-groupable');
+        $grid->setAttribute('data-url-group-assignment', $grid->Link('group_assignment'));
         // setoptions [groupUnassignedName, groupFieldLabel, groupField, groupsAvailable]
-        $field->setAttribute('data-groupable-unassigned', $this->getOption('groupUnassignedName'));
-        $field->setAttribute('data-groupable-role', $this->getOption('groupFieldLabel'));
-        $field->setAttribute('data-groupable-itemfield', $this->getOption('groupField'));
-        $field->setAttribute('data-groupable-groups', json_encode($this->getOption('groupsAvailable')));
+        $grid->setAttribute('data-groupable-unassigned', $this->getOption('groupUnassignedName'));
+        $grid->setAttribute('data-groupable-role', $this->getOption('groupFieldLabel'));
+        $grid->setAttribute('data-groupable-itemfield', $this->getOption('groupField'));
+
+        // Get groups from source record if string MultiValueField name
+//        $grid->setAttribute('data-groupable-groups', json_encode( $this->getOption('groupsAvailable') ) );
+        $groups = $this->getOption('groupsAvailable');
+        if (!$groups && $this->groupsFieldOnSource && ($form = $grid->getForm()) && ($record = $form->getRecord())) { //&& $record->hasDatabaseField($groups)
+            $groups = $record->dbObject($this->groupsFieldOnSource)->getValues();
+        }
+        $grid->setAttribute('data-groupable-groups', json_encode($groups));
+
+        // insert divider js tmpl
+        $groupsField = (is_string($this->getOption('groupsFieldOnSource')) ? $this->getOption('groupsFieldOnSource') : '');
+        $data = new ArrayData([
+            'ColSpan' => $grid->getColumnCount() - 1,
+            'GroupFieldLabel' => $this->groupFieldLabel,
+            'GroupsFieldNameOnSource' => $groupsField,
+        ]);
+
+        return [
+            'after' => $data->renderWith($this->dividerTemplate)
+        ];
 
     }
 
     /**
      * Handles requests to assign a new block area to a block item
      *
-     * @param \SilverStripe\Forms\GridField\GridField $grid
-     * @param \SilverStripe\Control\HTTPRequest $request
-     * @return \SilverStripe\Control\HTTPResponse|string
-     * @throws \SilverStripe\Control\HTTPResponse_Exception
-     *
-     * @throws \SilverStripe\ORM\ValidationException
-     * @throws \Exception
+     * @param GridField $grid
+     * @param HTTPRequest $request
+     * @return string
      */
     public function handleGroupAssignment($grid, $request)
     {
@@ -164,10 +198,8 @@ class GridFieldGroupable
         $modelClass = $grid->getModelClass();
         if ($list instanceof ManyManyList && !singleton($modelClass)->canView()) {
             $this->httpError(403);
-        } else {
-            if (!($list instanceof ManyManyList) && !singleton($modelClass)->canEdit()) {
-                $this->httpError(403);
-            }
+        } else if (!($list instanceof ManyManyList) && !singleton($modelClass)->canEdit()) {
+            $this->httpError(403);
         }
         //
 
@@ -179,35 +211,134 @@ class GridFieldGroupable
         $item = $list->byID($item_id);
         $groupField = $this->getOption('groupField');
 
-        // Update item with correct Group assigned (custom query required to write m_m_extraField)
-//        DB::query(sprintf(
-//            "UPDATE `%s` SET `%s` = '%s' WHERE `BlockID` = %d",
-//            'SiteTree_Blocks',
-//            'BlockArea',
-//            $group_key,
-//            $item_id
-//        ));
 
-        if ($list instanceof ManyManyList && array_key_exists($groupField, $list->getExtraFields())) {
-            // update many_many_extrafields (MMList->add() with a new item adds a row, with existing item modifies a row)
-            $list->add($item, array($groupField => $group_key));
+//        // only update  if we have an actual item (not if a boundary/whole group was dragged)
+//        if(!$item) return $grid->FieldHolder();
+        if ($item) {
+
+            // Update item with correct Group assigned (custom query required to write m_m_extraField)
+            //        DB::query(sprintf(
+            //            "UPDATE `%s` SET `%s` = '%s' WHERE `BlockID` = %d",
+            //            'SiteTree_Blocks',
+            //            'BlockArea',
+            //            $group_key,
+            //            $item_id
+            //        ));
+
+            if ($list instanceof ManyManyList && array_key_exists($groupField, $list->getExtraFields())) {
+                // update many_many_extrafields (MMList->add() with a new item adds a row, with existing item modifies a row)
+                $list->add($item, [$groupField => $group_key]);
+            } else {
+                // or simply update the field on the item itself
+                $item->$groupField = $group_key;
+                $item->write();
+            }
+
+            $this->extend('onAfterAssignGroupItems', $list);
+
         } else {
-            // or simply update the field on the item itself
-            $item->$groupField = $group_key;
-            $item->write();
+            // boundary was dragged
+            $groupsFieldOnSource = $this->groupsFieldOnSource;
+            $groupData = $request->requestVar($groupsFieldOnSource);
+
+            if ($groupsFieldOnSource && $groupData && ($form = $grid->getForm()) && ($record = $form->getRecord())) {
+                // update groups on record
+                $this->updateGroupsOnRecord($record, $groupsFieldOnSource, $groupData);
+
+                // load any other inline edits from gridfield into record (normally handled by forwarding to orderablerows::reorder)
+                $grid->saveInto($record);
+                $record->write();
+
+                return $grid->FieldHolder();
+            }
+
+            // dunno what happened here, try & continue normally...?
+
         }
 
-        $this->extend('onAfterAssignGroupItems', $list);
-
         // Forward the request to GridFieldOrderableRows::handleReorder (if GridFieldOrderableRows)
-        /** @var $orderableRowsComponent GridFieldOrderableRows */
-        $orderableRowsComponent = $grid->getConfig()->getComponentByType(GridFieldOrderableRows::class);
-        if ($orderableRowsComponent) {
+        $orderableRowsComponent = $grid->getConfig()->getComponentByType('GridFieldOrderableRows');
+        if ($orderableRowsComponent && $orderableRowsComponent->immediateUpdate) {
             return $orderableRowsComponent->handleReorder($grid, $request);
         } else {
             return $grid->FieldHolder();
         }
 
+    }
+
+    public function handleSave(GridField $grid, DataObjectInterface $record)
+    {
+//        $list = $grid->getList();
+//        $value = $grid->Value();
+//        if (!isset($value[__CLASS__]) || !is_array($value[__CLASS__])) {
+//            return;
+//        }
+        $groupsFieldOnSource = $this->groupsFieldOnSource;
+        // probably not the correct way to get the submitted data, but it works for now...
+        $groupData = Controller::curr()->getRequest()->requestVar($groupsFieldOnSource);
+
+        if ($groupsFieldOnSource && $groupData && ($form = $grid->getForm()) && ($record = $form->getRecord())) {
+            // update groups on record
+            $this->updateGroupsOnRecord($record, $groupsFieldOnSource, $groupData);
+        }
+
+        // and update each record's section if not already done via Ajax
+        if (!$this->immediateUpdate) {
+            $groupField = $this->getOption('groupField');
+            $list = $grid->getList();
+            $values = $grid->Value();
+//            "GridFieldGroupable"]=>
+//              array(10) {
+//                        [5]=>
+//                array(1) {
+//                            ["Section"]=>
+//                  string(24) "group_5460_1491390152511"
+            // Basic checks
+            if (!is_array($values)) return;
+            if (!array_key_exists('GridFieldGroupable', $values)) return;
+            $groupData = $values['GridFieldGroupable'];
+
+            // update each with new group
+            foreach ($list as $item) {
+                // checks
+                if (!array_key_exists($item->ID, $groupData)) continue;
+                if (!array_key_exists($groupField, $groupData[$item->ID])) continue;
+                $group_key = $groupData[$item->ID][$groupField];
+                if ($item->$groupField == $group_key) continue; // skip unchanged
+                // update
+                if ($list instanceof ManyManyList && array_key_exists($groupField, $list->getExtraFields())) {
+                    // update many_many_extrafields (MMList->add() with a new item adds a row, with existing item modifies a row)
+                    $list->add($item, [$groupField => $group_key]);
+                } else {
+                    // or simply update the field on the item itself
+                    $item->$groupField = $group_key;
+                    $item->write();
+                }
+            }
+
+//            $sortedIDs = $this->getSortedIDs($value);
+//            if ($sortedIDs) {
+//                $this->executeReorder($grid, $sortedIDs);
+//            }
+        }
+
+    }
+
+    private function updateGroupsOnRecord($record, $groupsFieldOnSource, $groupData)
+    {
+        // use KeyValueField to serialize, filters out empty values as well
+        $keyValueField = KeyValueField::create($groupsFieldOnSource);
+        $keyValueField->setValue($groupData);
+
+        // unset 'none' (not sent anymore because 'none' key gets 'disabled' and is thus not submitted anymore
+        // key has become '' (empty string) anyway
+        // left here because why not...
+        $keyvals = $keyValueField->Value(); // now a key-value list, with empty vals already filtered out
+        if (array_key_exists('none', $keyvals)) unset($keyvals['none']);
+        $keyValueField->setValue($keyvals);
+
+        // and save groups into record
+        $keyValueField->saveInto($record); // record is an object, so can be updated from this scope
     }
 
     /**
@@ -216,8 +347,6 @@ class GridFieldGroupable
      *
      * @param DataList $list
      * @return string
-     *
-     * @throws \Exception
      */
     public function getGroupTable(DataList $list)
     {
@@ -285,12 +414,12 @@ class GridFieldGroupable
     /**
      * Modify the list of columns displayed in the table.
      *
-     * @param \SilverStripe\Forms\GridField\GridField $gridField
-     * @param array $columns List of columns
-     * @param array - List reference of all column names.
+     * @see {@link GridFieldDataColumns->getDisplayFields()}
      * @see {@link GridFieldDataColumns}.
      *
-     * @see {@link GridFieldDataColumns->getDisplayFields()}
+     * @param GridField $gridField
+     * @param array $columns List of columns
+     * @param array - List reference of all column names.
      */
     public function augmentColumns($gridField, &$columns)
     {
@@ -299,52 +428,64 @@ class GridFieldGroupable
     /**
      * Names of all columns which are affected by this component.
      *
-     * @param \SilverStripe\Forms\GridField\GridField $gridField
+     * @param GridField $gridField
      * @return array
      */
     public function getColumnsHandled($gridField)
     {
-        return array('Reorder');
+        return ['Reorder'];
     }
 
     /**
      * HTML for the column, content of the <td> element.
      *
-     * @param \SilverStripe\Forms\GridField\GridField $gridField
-     * @param \SilverStripe\ORM\DataObject $record - Record displayed in this row
+     * @param GridField $gridField
+     * @param DataObject $record - Record displayed in this row
      * @param string $columnName
      * @return string - HTML for the column. Return NULL to skip.
      */
-    public function getColumnContent($gridField, $record, $columnName)
+    public function getColumnContent($grid, $record, $columnName)
     {
-        return null;
+        // In case you are using GridFieldGroupable, this ensures that
+        // the correct group is saved. If you are not using that component,
+        // this will be ignored by other components, but will still work for this.
+        $groupFieldName = sprintf(
+            '%s[GridFieldGroupable][%s][%s]',
+            $grid->getName(),
+            $record->ID,
+            $this->groupField
+        );
+        $sortField = new HiddenField($groupFieldName, false, $record->getField($this->groupField));
+        $sortField->addExtraClass('ss-groupable-hidden-group');
+        $sortField->setForm($grid->getForm());
+        return $sortField->Field();
     }
 
     /**
      * Attributes for the element containing the content returned by {@link getColumnContent()}.
      *
-     * @param \SilverStripe\Forms\GridField\GridField $gridField
-     * @param \SilverStripe\ORM\DataObject $record displayed in this row
+     * @param GridField $gridField
+     * @param DataObject $record displayed in this row
      * @param string $columnName
      * @return array
      */
     public function getColumnAttributes($gridField, $record, $columnName)
     {
         $groupField = $this->getOption('groupField');
-        return array('data-groupable-group' => $record->$groupField);
+        return ['data-groupable-group' => $record->$groupField];
     }
 
     /**
      * Additional metadata about the column which can be used by other components,
      * e.g. to set a title for a search column header.
      *
-     * @param \SilverStripe\Forms\GridField\GridField $gridField
+     * @param GridField $gridField
      * @param string $columnName
      * @return array - Map of arbitrary metadata identifiers to their values.
      */
     public function getColumnMetadata($gridField, $columnName)
     {
-        return array();
+        return [];
     }
 
 }

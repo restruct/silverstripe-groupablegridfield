@@ -1,52 +1,32 @@
 # SilverStripe GridField Groupable
-[![Build Status](https://travis-ci.org/micschk/silverstripe-groupable-gridfield.svg?branch=master)](https://travis-ci.org/micschk/silverstripe-groupable-gridfield)
-[![codecov.io](https://codecov.io/github/micschk/silverstripe-groupable-gridfield/coverage.svg?branch=master)](https://codecov.io/github/micschk/silverstripe-groupable-gridfield?branch=master)
+[![Build Status](https://travis-ci.org/restruct/silverstripe-groupable-gridfield.svg?branch=master)](https://travis-ci.org/restruct/silverstripe-groupable-gridfield)
+[![codecov.io](https://codecov.io/github/restruct/silverstripe-groupable-gridfield/coverage.svg?branch=master)](https://codecov.io/github/restruct/silverstripe-groupable-gridfield?branch=master)
 
-This module allows drag & drop grouping of items in a GridField. 
-It bolts on top of- and depends on GridFieldOrderableRows for the drag & drop sorting functionality
+This module facilitates drag & drop grouping of items in a GridField.   
+It bolts on top of- and depends on GridFieldOrderableRows for the drag & drop sorting functionality.  
+Allows adding new 'groups' on the fly when configured with a MultiValueField to store them.  
+Groups themselves can also be reordered (drag-drop, experimental). 
 
-### Screenshot
-
-![image](https://cloud.githubusercontent.com/assets/1005986/15631519/677fd806-256e-11e6-83a3-d4c072211d1b.png)
-
-Example application (Block Enhancements module): assign content blocks to block-areas by drag & drop
-
-## Installation
-
-#### Composer
-
-	composer require micschk/silverstripe-groupable-gridfield
-
-### Requirements (all pulled in by composer)
-
-* SilverStripe Framework ~4.0
-* SilverStripe GridFieldExtensions
+## NOTE: currently slightly 'WIP'
+We found a (Silverstripe 3) project in which quite a lot of development was done on this module which never got published (a.o. group reordering). These updates + additions have now been included + updated in this module but may still need a bit of work/debugging.
+- **Updated namespace** `micsck\GroupableGridfield` -> `Restruct\Silverstripe\Gridfield`
 
 ## Usage:
 ```php
-$grid = new GridField(
-    'ExampleGrid',
-    'Example Grid',
-    $this->Items(),
-    $gfConfig = GridFieldConfig::create()
-        ->addComponent(new GridFieldToolbarHeader())
-        ->addComponent(new GridFieldTitleHeader())
-        ->addComponent(new GridFieldEditableColumns())
-        ->addComponent(new GridFieldOrderableRows())
-        ->addComponent(new GridFieldFooter())
-);
-// add Groupable (example from BlockEnhancements module)
-$gfConfig->addComponent(new GridFieldGroupable(
-        'BlockArea',    // The fieldname to set the Group
-        'Area',   // A description of the function of the group
-        'none',         // A title/header for items without a group/unassigned
-        array(          // List of available values for the Group field
-            'BeforeContent' => 'Before Content',
-            'AfterContent' => 'Before Content',
-        )
+$gfConfig = GridFieldConfig::create()
+    // setup your config as usual, must include orderable rows
+    ->addComponent(new GridFieldOrderableRows())
+    // add Groupable + AddNewGroupButton
+    ->addComponent(new GridFieldAddNewGroupButton('buttons-before-right'))
+    ->addComponent(new GridFieldGroupable(
+        'Phase', // field on subjects to hold group key
+        $this->fieldLabel('Phase'), // label of group field
+        'none', // fallback/unassigned group name
+        null, // (fixed) list of available groups (key value), set to null to use MultiValue field instead
+        'Phases' // name of MultiValueField on source record to provide groups (allows adding new on-the-fly)
     ));
 ```
 
-## Thank you
+## Thanks
 
-[TITLE WEB SOLUTIONS](http://title.dk/) for sponsoring the isolation of this module out of [Blocks Enhancements](https://github.com/micschk/silverstripe-block_enhancements)
+- [TITLE WEB SOLUTIONS](http://title.dk/) for sponsoring the initial development of this module

@@ -1,45 +1,30 @@
 {
-    "name": "micschk/silverstripe-groupable-gridfield",
+    "name": "restruct/silverstripe-groupable-gridfield",
     "description": "This module allows drag & drop grouping of items in a GridField",
     "type": "silverstripe-vendormodule",
-    "keywords": [
-        "silverstripe",
-        "gridfield",
-        "groups"
-    ],
-    "homepage": "http://github.com/micschk/silverstripe-groupable-gridfield",
+    "license": "MIT",
     "authors": [
         {
             "name": "Restruct web & apps",
             "email": "dev@restruct.nl"
         }
     ],
-    "license": "MIT",
     "require": {
-        "symbiote/silverstripe-gridfieldextensions": "^4"
+        "symbiote/silverstripe-gridfieldextensions": "^3 || ^4"
     },
     "require-dev": {
         "phpunit/phpunit": "^5.7",
         "squizlabs/php_codesniffer": "*"
     },
-    "suggest": {
-        "micschk/silverstripe-block_enhancements": "Enhancements to the Silverstripe Blocks module"
-    },
     "autoload": {
         "psr-4": {
-            "micschk\\GroupableGridfield\\": "src/",
-            "micschk\\GroupableGridfield\\Test\\": "tests/"
+            "Restruct\\Silverstripe\\GroupableGridfield\\": "src/",
+            "Restruct\\Silverstripe\\GroupableGridfield\\Test\\": "tests/"
         }
     },
-    "minimum-stability": "dev",
-    "prefer-stable": true,
     "extra": {
         "expose": [
-            "css",
-            "js"
-        ],
-        "branch-alias": {
-            "dev-master": "2.0.x-dev"
-        }
+            "client"
+        ]
     }
 }

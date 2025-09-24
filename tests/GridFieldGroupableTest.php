@@ -1,8 +1,8 @@
 <?php
 
-namespace micschk\GroupableGridfield\Test;
+namespace Restruct\Silverstripe\GroupableGridfield\Test;
 
-use micschk\GroupableGridfield\GridFieldGroupable;
+use Restruct\Silverstripe\GroupableGridfield\GridFieldGroupable;
 use SilverStripe\Dev\SapphireTest;
 use SilverStripe\ORM\DataObject;
 

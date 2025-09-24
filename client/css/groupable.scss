@@ -1,0 +1,43 @@
+.cms {
+
+  // helpers
+  .text-fade { color: #aaa; }
+
+  // Tweak orderable handle (within .groupable-bound)
+  .ss-gridfield-orderable tr.groupable-bound .col-reorder .handle {
+    padding: 14px 0 10px;
+  }
+
+  // group bounds
+  table.grid-field__table tr.groupable-bound {
+    background: repeating-linear-gradient(90deg, #dbe0e9, #dbe0e9 1px, transparent 1px, transparent 2px);
+    &:hover {
+      background: repeating-linear-gradient(90deg, #dbe0e9, #dbe0e9 1px, #f0f4f7 1px, #f0f4f7 2px);
+    }
+
+    td {
+      padding-top: 1rem;
+      padding-bottom: 1rem;
+      cursor: default;
+      //background-color: #dae2e7;
+
+      .boundary-indicator {
+        font-size: 130%;
+      }
+
+      input.text {
+        width: 32em;
+        display: inline;
+      }
+
+      span.alert {
+        padding: .5rem;
+      }
+    }
+
+    // Groupable AddNew Group Button
+    .groupable-data-hidden {
+      display: none;
+    }
+  }
+}
