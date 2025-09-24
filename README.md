@@ -11,7 +11,7 @@ Groups themselves can also be reordered (drag-drop, experimental).
 
 ## NOTE: currently slightly 'WIP'
 We found a (Silverstripe 3) project in which quite a lot of development was done on this module which never got published (a.o. group reordering). These updates + additions have now been included + updated in this module but may still need a bit of work/debugging.
-- **Updated namespace** `micsck\GroupableGridfield` -> `Restruct\Silverstripe\Gridfield`
+- **Updated namespace** `micsck\GroupableGridfield` -> `Restruct\Silverstripe\GroupableGridfield`
 
 ## Usage:
 ```php
