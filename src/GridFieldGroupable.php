@@ -13,62 +13,21 @@ use SilverStripe\Forms\GridField\GridField_HTMLProvider;
 use SilverStripe\Forms\GridField\GridField_SaveHandler;
 use SilverStripe\Forms\GridField\GridField_URLHandler;
 use SilverStripe\Forms\HiddenField;
+use SilverStripe\Model\ArrayData;
 use SilverStripe\ORM\DataList;
 use SilverStripe\ORM\DataObject;
 use SilverStripe\ORM\DataObjectInterface;
 use SilverStripe\ORM\ManyManyList;
-use SilverStripe\View\ArrayData;
 use SilverStripe\View\Requirements;
 use Symbiote\GridFieldExtensions\GridFieldOrderableRows;
 use Symbiote\MultiValueField\Fields\KeyValueField;
 
-class GridFieldGroupable
-    extends RequestHandler
-    implements GridField_HTMLProvider,
-        GridField_ColumnProvider,
-        GridField_URLHandler,
-        GridField_SaveHandler
+class GridFieldGroupable extends RequestHandler implements GridField_HTMLProvider, GridField_ColumnProvider, GridField_URLHandler, GridField_SaveHandler
 {
 
     private static $allowed_actions = [
         'handleGroupAssignment',
     ];
-
-    /**
-     * The field on subjects to hold group key
-     *
-     * @var string
-     */
-    protected $groupField;
-
-    /**
-     * The label for field on subjects to hold group key
-     *
-     * @var string
-     */
-    protected $groupFieldLabel;
-
-    /**
-     * fallback/unassigned group name
-     *
-     * @var string
-     */
-    protected $groupUnassignedName;
-
-    /**
-     * The list of available groups (key/value) or null if providing $groupsFieldNameOnSource
-     *
-     * @var array
-     */
-    protected $groupsAvailable;
-
-    /**
-     * The database field on the source record which provides the groups (MultiValueField)
-     *
-     * @see setSortField()
-     * @var string
-     */
-    protected $groupsFieldOnSource;
 
     /**
      * The row template to render this with
@@ -83,21 +42,34 @@ class GridFieldGroupable
      * @param string $groupUnassignedName fallback/unassigned group name
      * @param array $groupsAvailable list of groups (key value)
      * @param string $groupsFieldOnSource MultiValue field on source record to provide groups
+     * @param string $groupFieldOnSubject
      */
     public function __construct(
-        $groupFieldOnSubject = 'Group',
-        $groupFieldLabel = 'Group',
-        $groupUnassignedName = '[none/inactive]',
-        $groupsAvailable = [],
-        $groupsFieldOnSource = null
+        /**
+         * The field on subjects to hold group key
+         */
+        protected $groupField = 'Group',
+        /**
+         * The label for field on subjects to hold group key
+         */
+        protected $groupFieldLabel = 'Group',
+        /**
+         * fallback/unassigned group name
+         */
+        protected $groupUnassignedName = '[none/inactive]',
+        /**
+         * The list of available groups (key/value) or null if providing $groupsFieldNameOnSource
+         */
+        protected $groupsAvailable = [],
+        /**
+         * The database field on the source record which provides the groups (MultiValueField)
+         *
+         * @see setSortField()
+         */
+        protected $groupsFieldOnSource = null
     )
     {
         parent::__construct();
-        $this->groupField = $groupFieldOnSubject;
-        $this->groupFieldLabel = $groupFieldLabel;
-        $this->groupUnassignedName = $groupUnassignedName;
-        $this->groupsAvailable = $groupsAvailable;
-        $this->groupsFieldOnSource = $groupsFieldOnSource;
     }
 
     /**
@@ -167,6 +139,7 @@ class GridFieldGroupable
         if (!$groups && $this->groupsFieldOnSource && ($form = $grid->getForm()) && ($record = $form->getRecord())) { //&& $record->hasDatabaseField($groups)
             $groups = $record->dbObject($this->groupsFieldOnSource)->getValues();
         }
+
         $grid->setAttribute('data-groupable-groups', json_encode($groups));
 
         // insert divider js tmpl
@@ -198,9 +171,10 @@ class GridFieldGroupable
         $modelClass = $grid->getModelClass();
         if ($list instanceof ManyManyList && !singleton($modelClass)->canView()) {
             $this->httpError(403);
-        } else if (!($list instanceof ManyManyList) && !singleton($modelClass)->canEdit()) {
+        } elseif (!($list instanceof ManyManyList) && !singleton($modelClass)->canEdit()) {
             $this->httpError(403);
         }
+
         //
 
         $item_id = $request->postVar('groupable_item_id');
@@ -208,6 +182,7 @@ class GridFieldGroupable
         if ($group_key == 'none') {
             $group_key = '';
         }
+
         $item = $list->byID($item_id);
         $groupField = $this->getOption('groupField');
 
@@ -260,9 +235,9 @@ class GridFieldGroupable
         $orderableRowsComponent = $grid->getConfig()->getComponentByType('GridFieldOrderableRows');
         if ($orderableRowsComponent && $orderableRowsComponent->immediateUpdate) {
             return $orderableRowsComponent->handleReorder($grid, $request);
-        } else {
-            return $grid->FieldHolder();
         }
+
+        return $grid->FieldHolder();
 
     }
 
@@ -286,25 +261,39 @@ class GridFieldGroupable
         if (!$this->immediateUpdate) {
             $groupField = $this->getOption('groupField');
             $list = $grid->getList();
-            $values = $grid->Value();
-//            "GridFieldGroupable"]=>
-//              array(10) {
-//                        [5]=>
-//                array(1) {
-//                            ["Section"]=>
-//                  string(24) "group_5460_1491390152511"
+            $values = Controller::curr()->getRequest()->requestVar($grid->getName());
+            //            "GridFieldGroupable"]=>
+            //              array(10) {
+            //                        [5]=>
+            //                array(1) {
+            //                            ["Section"]=>
+            //                  string(24) "group_5460_1491390152511"
             // Basic checks
-            if (!is_array($values)) return;
-            if (!array_key_exists('GridFieldGroupable', $values)) return;
+            if (!is_array($values)) {
+                return;
+            }
+
+            if (!array_key_exists('GridFieldGroupable', $values)) {
+                return;
+            }
+
             $groupData = $values['GridFieldGroupable'];
 
             // update each with new group
             foreach ($list as $item) {
                 // checks
-                if (!array_key_exists($item->ID, $groupData)) continue;
-                if (!array_key_exists($groupField, $groupData[$item->ID])) continue;
+                if (!array_key_exists($item->ID, $groupData)) {
+                    continue;
+                }
+
+                if (!array_key_exists($groupField, $groupData[$item->ID])) {
+                    continue;
+                }
+
                 $group_key = $groupData[$item->ID][$groupField];
-                if ($item->$groupField == $group_key) continue; // skip unchanged
+                if ($item->$groupField == $group_key) {
+                    continue;
+                } // skip unchanged
                 // update
                 if ($list instanceof ManyManyList && array_key_exists($groupField, $list->getExtraFields())) {
                     // update many_many_extrafields (MMList->add() with a new item adds a row, with existing item modifies a row)
@@ -333,8 +322,12 @@ class GridFieldGroupable
         // unset 'none' (not sent anymore because 'none' key gets 'disabled' and is thus not submitted anymore
         // key has become '' (empty string) anyway
         // left here because why not...
-        $keyvals = $keyValueField->Value(); // now a key-value list, with empty vals already filtered out
-        if (array_key_exists('none', $keyvals)) unset($keyvals['none']);
+        $keyvals = $keyValueField->getValue();
+        // now a key-value list, with empty vals already filtered out
+        if (array_key_exists('none', $keyvals)) {
+            unset($keyvals['none']);
+        }
+
         $keyValueField->setValue($keyvals);
 
         // and save groups into record
@@ -345,7 +338,6 @@ class GridFieldGroupable
      * Gets the table which contains the group field.
      * (adapted from GridFieldOrderableRows)
      *
-     * @param DataList $list
      * @return string
      */
     public function getGroupTable(DataList $list)
@@ -369,17 +361,13 @@ class GridFieldGroupable
             }
         }
 
-        throw new Exception("Couldn't find the sort field '$field'");
+        throw new Exception(sprintf("Couldn't find the sort field '%s'", $field));
     }
 
     // (adapted from GridFieldOrderableRows)
     protected function getGroupTableClauseForIds(DataList $list, $ids)
     {
-        if (is_array($ids)) {
-            $value = 'IN (' . implode(', ', array_map('intval', $ids)) . ')';
-        } else {
-            $value = '= ' . (int)$ids;
-        }
+        $value = is_array($ids) ? 'IN (' . implode(', ', array_map('intval', $ids)) . ')' : '= ' . (int)$ids;
 
         if ($list instanceof ManyManyList) {
             $extra = $list->getExtraFields();
@@ -398,7 +386,7 @@ class GridFieldGroupable
             }
         }
 
-        return "\"ID\" $value";
+        return '"ID" ' . $value;
     }
 
 

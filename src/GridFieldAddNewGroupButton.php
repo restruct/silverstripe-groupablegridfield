@@ -4,19 +4,16 @@ namespace Restruct\Silverstripe\GroupableGridfield;
 
 use Exception;
 use SilverStripe\Forms\GridField\GridField_HTMLProvider;
-use SilverStripe\View\ArrayData;
+use SilverStripe\Model\ArrayData;
 use Symbiote\MultiValueField\Fields\KeyValueField;
 
 /**
  * Component to allow adding Groups for grouping objects using GridFieldGroupable
  * Requires a MultiValueField on
  */
-class GridFieldAddNewGroupButton
-    extends KeyValueField
+class GridFieldAddNewGroupButton extends KeyValueField
     implements GridField_HTMLProvider
 {
-
-    protected $fragment;
 
     protected $title;
 
@@ -34,11 +31,9 @@ class GridFieldAddNewGroupButton
      * @param string $fragment the fragment to render the button in
      */
 //	public function __construct($groupsRelationField = 'Groups', $fragment = 'buttons-before-left', $title = null, $sourceKeys = array(), $sourceValues = array(), $value=null, $form=null) {
-    public function __construct($fragment = 'buttons-before-left')
+    public function __construct(protected $fragment = 'buttons-before-left')
     {
-//        parent::__construct($title, $sourceKeys, $sourceValues, $value, $form);
-        $this->fragment = $fragment;
-        $this->title = _t('GridFieldExtensions.ADD', 'Add');
+$this->title = _t('GridFieldExtensions.ADD', 'Add');
     }
 
     /**
@@ -77,12 +72,14 @@ class GridFieldAddNewGroupButton
 
         if (!$groupable = $grid->getConfig()->getComponentByType(GridFieldGroupable::class)) {
             throw new Exception('GridFieldAddNewGroupButton requires the GridFieldGroupable component');
-        } else {
-            $groupLabel = $groupable->getOption('groupFieldLabel');
-            $this->groupsRelationField = $groupable->getOption('groupsFieldOnSource');
-            $groupable->setOption('dividerTemplate', 'GFEnhancedGroupableDivider');
-//            die($groupable->getOption('dividerTemplate'));
         }
+
+        $groupLabel = $groupable->getOption('groupFieldLabel');
+        $this->groupsRelationField = $groupable->getOption('groupsFieldOnSource');
+        $groupable->setOption('dividerTemplate', 'GFEnhancedGroupableDivider');
+        //            die($groupable->getOption('dividerTemplate'));
+
+
         if (!$this->groupsRelationField) {
             throw new Exception('GridFieldAddNewGroupButton requires the GridFieldGroupable component to have groupsFieldOnSource set');
         }
@@ -91,11 +88,14 @@ class GridFieldAddNewGroupButton
         $record = null;
         $groupsFromGrid = $groupable->getOption('groupsAvailable');
         if (!$groupsFromGrid && $this->groupsRelationField && ($form = $grid->getForm()) && ($record = $form->getRecord())) { //&& $record->hasDatabaseField($groups)
-            $groupsFromGrid = $record->dbObject($this->groupsRelationField)->getValues();
+            $dbObject = $record->dbObject($this->groupsRelationField);
+            if ($dbObject && method_exists($dbObject, 'getValues')) {
+                $groupsFromGrid = $dbObject->getValues();
+            }
         }
 
-        $data = new ArrayData([
-            'Title' => ($this->title == _t('GridFieldExtensions.ADD', 'Add') ? $this->title . " $groupLabel" : $this->title),
+        $data = ArrayData::create([
+            'Title' => ($this->title == _t('GridFieldExtensions.ADD', 'Add') ? $this->title . (' ' . $groupLabel) : $this->title),
             'GroupsRelationField' => $this->groupsRelationField,
             'AvailableGroups' => json_encode($groupsFromGrid),
             'UnsavedGroupNotice' => _t(
@@ -105,7 +105,7 @@ class GridFieldAddNewGroupButton
                 [
                     'record_singular_name' => strtolower($record ? $record->singular_name(): 'record'),
                     'relation_label' => strtolower($grid ? $grid->Title(): 'items'),
-                    'group_label' => strtolower($groupLabel),
+                    'group_label' => strtolower((string) $groupLabel),
                 ]),
         ]);
 
