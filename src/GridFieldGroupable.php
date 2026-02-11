@@ -2,6 +2,7 @@
 
 namespace Restruct\Silverstripe\GroupableGridfield;
 
+use Closure;
 use Exception;
 use SilverStripe\Control\Controller;
 use SilverStripe\Control\HTTPRequest;
@@ -17,6 +18,8 @@ use SilverStripe\ORM\DataList;
 use SilverStripe\ORM\DataObject;
 use SilverStripe\ORM\DataObjectInterface;
 use SilverStripe\ORM\ManyManyList;
+use SilverStripe\ORM\ManyManyThroughList;
+use SilverStripe\ORM\SS_List;
 use SilverStripe\View\ArrayData;
 use SilverStripe\View\Requirements;
 use Symbiote\GridFieldExtensions\GridFieldOrderableRows;
@@ -32,6 +35,10 @@ class GridFieldGroupable
 
     private static $allowed_actions = [
         'handleGroupAssignment',
+        'handleGroupCreate',
+        'handleGroupReorder',
+        'handleGroupAction',
+        'handleGroupDelete',
     ];
 
     /**
@@ -116,6 +123,61 @@ class GridFieldGroupable
      * Inspired by GridFieldOrderableRows::$sortField.
      */
     protected ?string $groupSortField = null;
+
+    // ========================================
+    // Group Creation (Phase 2)
+    // ========================================
+
+    /**
+     * Custom handler for creating new groups (DataObject mode only).
+     *
+     * Callback signature: (GridField $gridField, DataObject $sourceRecord, array $groupData)
+     * Should return: ['success' => bool, 'group' => DataObject|null, 'message' => string]
+     *
+     * If not set, creates DataObject directly and adds to relation.
+     */
+    protected ?Closure $groupCreateHandler = null;
+
+    // ========================================
+    // Group Actions (Phase 4)
+    // ========================================
+
+    /**
+     * Custom action buttons for group rows (DataObject mode only).
+     *
+     * Array format: [
+     *   'action_name' => [
+     *     'icon' => 'font-icon-sync',
+     *     'title' => 'Sync to FUSE',
+     *     'handler' => Closure,
+     *   ],
+     * ]
+     *
+     * Handler signature: (GridField $gridField, DataObject $group, DataObject $sourceRecord)
+     * Should return: ['success' => bool, 'message' => string, 'redirect' => string|null]
+     */
+    protected array $groupActions = [];
+
+    // ========================================
+    // Group Delete Handling (Phase 5)
+    // ========================================
+
+    /**
+     * Behavior when deleting a group.
+     *
+     * 'unassign' (default) - Unassign items from the group (set to null), then delete group
+     * 'prevent' - Prevent deletion if items are assigned to the group
+     * 'callback' - Use custom handler for deletion logic
+     */
+    protected string $deleteMode = 'unassign';
+
+    /**
+     * Custom handler for group deletion (only used when deleteMode is 'callback').
+     *
+     * Callback signature: (GridField $gridField, DataObject $group, DataList $itemsInGroup)
+     * Should return: ['success' => bool, 'message' => string]
+     */
+    protected ?Closure $groupDeleteHandler = null;
 
     /**
      * @param string $groupField field on subjects to hold group key
@@ -272,11 +334,182 @@ class GridFieldGroupable
     }
 
     /**
+     * Gets the table which contains the group sort field.
+     * Adapted from GridFieldOrderableRows::getSortTable().
+     *
+     * @param SS_List $groupList The list of groups
+     * @return string The table name
+     * @throws Exception If sort field cannot be found
+     */
+    public function getGroupSortTable(SS_List $groupList): string
+    {
+        $field = $this->groupSortField;
+
+        if (!$field) {
+            throw new Exception('No group sort field configured');
+        }
+
+        if ($groupList instanceof ManyManyList) {
+            $extra = $groupList->getExtraFields();
+            if ($extra && array_key_exists($field, $extra)) {
+                return $groupList->getJoinTable();
+            }
+        } elseif ($groupList instanceof ManyManyThroughList) {
+            // For ManyManyThroughList, check the through/join class
+            $joinClass = $groupList->getJoinClass();
+            $schema = DataObject::getSchema();
+            $fieldTable = $schema->tableForField($joinClass, $field);
+            if ($fieldTable) {
+                return $fieldTable;
+            }
+        }
+
+        // Field is on the DataObject itself
+        $classes = ClassInfo::dataClassesFor($groupList->dataClass());
+        foreach ($classes as $class) {
+            if (DataObject::singleton($class)->hasOwnTableDatabaseField($field)) {
+                return DataObject::getSchema()->tableName($class);
+            }
+        }
+
+        throw new Exception("Couldn't find group sort field '$field'");
+    }
+
+    /**
      * Check if this component is in DataObject mode (vs MultiValueField mode).
      */
     public function isDataObjectMode(): bool
     {
         return $this->groupsRelation !== null;
+    }
+
+    // ========================================
+    // Group Creation Setters/Getters (Phase 2)
+    // ========================================
+
+    /**
+     * Set custom handler for creating new groups (DataObject mode only).
+     *
+     * Callback signature: (GridField $gridField, DataObject $sourceRecord, array $groupData)
+     * Should return: ['success' => bool, 'group' => DataObject|null, 'message' => string]
+     *
+     * If not set, creates DataObject directly and adds to relation.
+     *
+     * @param Closure $handler
+     * @return $this
+     */
+    public function setGroupCreateHandler(Closure $handler): self
+    {
+        $this->groupCreateHandler = $handler;
+        return $this;
+    }
+
+    /**
+     * Get the custom group creation handler.
+     */
+    public function getGroupCreateHandler(): ?Closure
+    {
+        return $this->groupCreateHandler;
+    }
+
+    // ========================================
+    // Group Actions Setters/Getters (Phase 4)
+    // ========================================
+
+    /**
+     * Add an action button to group rows (DataObject mode only).
+     *
+     * Inspired by GridFieldSaveToFuseButton closure pattern.
+     *
+     * @param string $name Action identifier (used in URL and JS)
+     * @param string $icon Font icon class (e.g., 'font-icon-sync')
+     * @param string $title Button title/tooltip
+     * @param Closure $handler Handler receives: (GridField, DataObject $group, DataObject $source)
+     *                         Returns: ['success' => bool, 'message' => string, 'redirect' => string|null]
+     * @return $this
+     */
+    public function addGroupAction(string $name, string $icon, string $title, Closure $handler): self
+    {
+        $this->groupActions[$name] = [
+            'icon' => $icon,
+            'title' => $title,
+            'handler' => $handler,
+        ];
+        return $this;
+    }
+
+    /**
+     * Remove a group action by name.
+     *
+     * @param string $name Action identifier
+     * @return $this
+     */
+    public function removeGroupAction(string $name): self
+    {
+        unset($this->groupActions[$name]);
+        return $this;
+    }
+
+    /**
+     * Get all registered group actions.
+     *
+     * @return array
+     */
+    public function getGroupActions(): array
+    {
+        return $this->groupActions;
+    }
+
+    /**
+     * Check if any group actions are registered.
+     */
+    public function hasGroupActions(): bool
+    {
+        return !empty($this->groupActions);
+    }
+
+    // ========================================
+    // Group Delete Handling Setters/Getters (Phase 5)
+    // ========================================
+
+    /**
+     * Set the behavior when deleting a group.
+     *
+     * @param string $mode 'unassign' (default), 'prevent', or 'callback'
+     * @param Closure|null $handler Required if mode is 'callback'
+     *        Receives: (GridField $gridField, DataObject $group, DataList $itemsInGroup)
+     *        Returns: ['success' => bool, 'message' => string]
+     * @return $this
+     */
+    public function setGroupDeleteBehavior(string $mode, ?Closure $handler = null): self
+    {
+        if (!in_array($mode, ['unassign', 'prevent', 'callback'])) {
+            throw new \InvalidArgumentException("Invalid delete mode: $mode. Must be 'unassign', 'prevent', or 'callback'");
+        }
+
+        if ($mode === 'callback' && !$handler) {
+            throw new \InvalidArgumentException("Delete mode 'callback' requires a handler Closure");
+        }
+
+        $this->deleteMode = $mode;
+        $this->groupDeleteHandler = $handler;
+        return $this;
+    }
+
+    /**
+     * Get the current delete mode.
+     */
+    public function getDeleteMode(): string
+    {
+        return $this->deleteMode;
+    }
+
+    /**
+     * Get the custom delete handler.
+     */
+    public function getGroupDeleteHandler(): ?Closure
+    {
+        return $this->groupDeleteHandler;
     }
 
     /**
@@ -294,6 +527,10 @@ class GridFieldGroupable
     {
         return [
             'POST group_assignment' => 'handleGroupAssignment',
+            'POST group_create' => 'handleGroupCreate',
+            'POST group_reorder' => 'handleGroupReorder',
+            'POST group_action/$GroupID/$ActionName' => 'handleGroupAction',
+            'POST group_delete/$GroupID' => 'handleGroupDelete',
         ];
     }
 
@@ -312,10 +549,28 @@ class GridFieldGroupable
         // set ajax urls / vars
         $grid->addExtraClass('ss-gridfield-groupable');
         $grid->setAttribute('data-url-group-assignment', $grid->Link('group_assignment'));
+        $grid->setAttribute('data-url-group-reorder', $grid->Link('group_reorder'));
         // setoptions [groupUnassignedName, groupFieldLabel, groupField, groupsAvailable]
         $grid->setAttribute('data-groupable-unassigned', $this->getOption('groupUnassignedName'));
         $grid->setAttribute('data-groupable-role', $this->getOption('groupFieldLabel'));
         $grid->setAttribute('data-groupable-itemfield', $this->getOption('groupField'));
+        // DataObject mode specific attributes
+        $grid->setAttribute('data-groupable-sortable', $this->groupSortField ? 'true' : 'false');
+        $grid->setAttribute('data-url-group-action', $grid->Link('group_action'));
+        $grid->setAttribute('data-url-group-delete', $grid->Link('group_delete'));
+        $grid->setAttribute('data-groupable-delete-mode', $this->deleteMode);
+
+        // Serialize group actions for JS (without handlers)
+        if ($this->hasGroupActions()) {
+            $actionsForJs = [];
+            foreach ($this->groupActions as $name => $action) {
+                $actionsForJs[$name] = [
+                    'icon' => $action['icon'],
+                    'title' => $action['title'],
+                ];
+            }
+            $grid->setAttribute('data-groupable-actions', json_encode($actionsForJs));
+        }
 
         // Get groups - either from DataObject relation or MultiValueField
         $groups = [];
@@ -362,10 +617,17 @@ class GridFieldGroupable
             'GroupFieldLabel' => $this->groupFieldLabel,
             'GroupsFieldNameOnSource' => $groupsField,
             'IsDataObjectMode' => $this->isDataObjectMode(),
+            'HasGroupActions' => $this->hasGroupActions(),
         ]);
 
+        // Select template: use DataObject template if in DataObject mode and no custom template set
+        $template = $this->dividerTemplate;
+        if ($this->isDataObjectMode() && $template === 'GFGroupableDivider') {
+            $template = 'GFDataObjectGroupableDivider';
+        }
+
         return [
-            'after' => $data->renderWith($this->dividerTemplate)
+            'after' => $data->renderWith($template)
         ];
 
     }
@@ -453,6 +715,515 @@ class GridFieldGroupable
             return $grid->FieldHolder();
         }
 
+    }
+
+    /**
+     * Handle group creation request (DataObject mode only).
+     *
+     * Supports custom creation handlers for complex scenarios (e.g., FUSE API calls).
+     * Falls back to default DataObject creation if no handler is set.
+     *
+     * @param GridField $grid
+     * @param HTTPRequest $request
+     * @return string JSON response
+     */
+    public function handleGroupCreate($grid, $request)
+    {
+        // Only supported in DataObject mode
+        if (!$this->isDataObjectMode()) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Group creation is only supported in DataObject mode',
+            ]);
+        }
+
+        // Permission check
+        $form = $grid->getForm();
+        $record = $form ? $form->getRecord() : null;
+
+        if (!$record || !$record->canEdit()) {
+            $this->httpError(403, 'Permission denied');
+        }
+
+        // Get group data from request
+        $groupData = [
+            'name' => $request->postVar('group_name') ?? '',
+            'title' => $request->postVar('group_title') ?? $request->postVar('group_name') ?? '',
+        ];
+
+        // Collect any additional data from request with 'group_' prefix
+        foreach ($request->postVars() as $key => $value) {
+            if (str_starts_with($key, 'group_') && !in_array($key, ['group_name', 'group_title'])) {
+                $fieldName = substr($key, 6); // Remove 'group_' prefix
+                $groupData[$fieldName] = $value;
+            }
+        }
+
+        // Extension hook before creation
+        $this->extend('onBeforeCreateGroup', $grid, $record, $groupData);
+
+        $group = null;
+        $success = false;
+        $message = '';
+
+        try {
+            if ($this->groupCreateHandler) {
+                // Use custom handler (for complex creation like FUSE API calls)
+                $handler = $this->groupCreateHandler;
+                $result = $handler($grid, $record, $groupData);
+
+                // Handler should return array with 'success', 'group', 'message' keys
+                if (is_array($result)) {
+                    $success = $result['success'] ?? false;
+                    $group = $result['group'] ?? null;
+                    $message = $result['message'] ?? '';
+                } elseif ($result instanceof DataObject) {
+                    // Handler returned DataObject directly - treat as success
+                    $success = true;
+                    $group = $result;
+                    $message = 'Group created successfully';
+                } else {
+                    $success = false;
+                    $message = 'Invalid response from group creation handler';
+                }
+            } else {
+                // Default creation: create DataObject and add to relation
+                $relationName = $this->groupsRelation;
+                $relation = $record->$relationName();
+
+                // Get the class of related objects
+                $relationClass = $relation->dataClass();
+
+                // Create new group DataObject
+                $group = $relationClass::create();
+
+                // Set title field
+                $titleField = $this->groupTitleField;
+                $group->$titleField = $groupData['title'] ?? $groupData['name'] ?? 'New Group';
+
+                // Set any other matching fields from groupData
+                foreach ($groupData as $field => $value) {
+                    if ($group->hasField($field) && $field !== $titleField) {
+                        $group->$field = $value;
+                    }
+                }
+
+                // Set sort value if configured (place at end)
+                if ($this->groupSortField) {
+                    $sortField = $this->groupSortField;
+                    $maxSort = $relation->max($sortField) ?? 0;
+                    $group->$sortField = $maxSort + 1;
+                }
+
+                // Write the group
+                $group->write();
+
+                // Add to relation
+                $relation->add($group);
+
+                $success = true;
+                $message = 'Group created successfully';
+            }
+        } catch (Exception $e) {
+            $success = false;
+            $message = 'Error creating group: ' . $e->getMessage();
+        }
+
+        // Extension hook after creation
+        $this->extend('onAfterCreateGroup', $grid, $record, $group, $success, $message);
+
+        // Return JSON response with group data for JS
+        $response = [
+            'success' => $success,
+            'message' => $message,
+        ];
+
+        if ($success && $group) {
+            $response['group'] = [
+                'id' => $group->ID,
+                'name' => $group->{$this->groupTitleField},
+            ];
+
+            // Include metadata fields
+            foreach ($this->groupMetadataFields as $field) {
+                $response['group'][$field] = $group->$field;
+            }
+        }
+
+        // Return updated GridField HTML along with response
+        $response['html'] = $grid->FieldHolder();
+
+        return json_encode($response);
+    }
+
+    /**
+     * Handle group reordering request (DataObject mode only).
+     *
+     * Receives sorted group IDs and updates sort values.
+     *
+     * @param GridField $grid
+     * @param HTTPRequest $request
+     * @return string JSON response
+     */
+    public function handleGroupReorder($grid, $request)
+    {
+        // Only supported in DataObject mode with sort field
+        if (!$this->isDataObjectMode()) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Group reordering is only supported in DataObject mode',
+            ]);
+        }
+
+        if (!$this->groupSortField) {
+            return json_encode([
+                'success' => false,
+                'message' => 'No group sort field configured',
+            ]);
+        }
+
+        // Permission check
+        $form = $grid->getForm();
+        $record = $form ? $form->getRecord() : null;
+
+        if (!$record || !$record->canEdit()) {
+            $this->httpError(403, 'Permission denied');
+        }
+
+        // Get sorted IDs from request
+        $sortedIDs = $request->postVar('group_order');
+        if (!$sortedIDs || !is_array($sortedIDs)) {
+            return json_encode([
+                'success' => false,
+                'message' => 'No group order provided',
+            ]);
+        }
+
+        // Clean and validate IDs
+        $sortedIDs = array_filter(array_map('intval', $sortedIDs));
+
+        if (empty($sortedIDs)) {
+            return json_encode([
+                'success' => false,
+                'message' => 'No valid group IDs provided',
+            ]);
+        }
+
+        try {
+            $relationName = $this->groupsRelation;
+            $groupList = $record->$relationName();
+            $sortField = $this->groupSortField;
+
+            // Extension hook before reordering
+            $this->extend('onBeforeReorderGroups', $grid, $record, $groupList, $sortedIDs);
+
+            // Determine where sort field lives
+            $sortTable = $this->getGroupSortTable($groupList);
+
+            // Update sort values
+            $sort = 1;
+            foreach ($sortedIDs as $groupID) {
+                if ($groupList instanceof ManyManyList) {
+                    // Check if sort field is in extra fields
+                    $extra = $groupList->getExtraFields();
+                    if ($extra && array_key_exists($sortField, $extra)) {
+                        // Update via many_many extra fields
+                        $group = $groupList->byID($groupID);
+                        if ($group) {
+                            $groupList->add($group, [$sortField => $sort]);
+                        }
+                    } else {
+                        // Sort field is on the DataObject
+                        $group = $groupList->byID($groupID);
+                        if ($group) {
+                            $group->$sortField = $sort;
+                            $group->write();
+                        }
+                    }
+                } elseif ($groupList instanceof ManyManyThroughList) {
+                    // For through lists, update the join record
+                    $group = $groupList->byID($groupID);
+                    if ($group) {
+                        // Access through record and update
+                        $throughList = $groupList->filter('ID', $groupID);
+                        foreach ($throughList as $throughRecord) {
+                            $joinRecord = $throughRecord->getJoin();
+                            if ($joinRecord && $joinRecord->hasField($sortField)) {
+                                $joinRecord->$sortField = $sort;
+                                $joinRecord->write();
+                            } else {
+                                // Fallback: sort on main object
+                                $throughRecord->$sortField = $sort;
+                                $throughRecord->write();
+                            }
+                        }
+                    }
+                } else {
+                    // Regular has_many - sort field is on the DataObject
+                    $group = $groupList->byID($groupID);
+                    if ($group) {
+                        $group->$sortField = $sort;
+                        $group->write();
+                    }
+                }
+                $sort++;
+            }
+
+            // Extension hook after reordering
+            $this->extend('onAfterReorderGroups', $grid, $record, $groupList, $sortedIDs);
+
+            return json_encode([
+                'success' => true,
+                'message' => 'Groups reordered successfully',
+                'html' => $grid->FieldHolder(),
+            ]);
+
+        } catch (Exception $e) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Error reordering groups: ' . $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Handle group action request (DataObject mode only).
+     *
+     * Routes to registered action handlers based on group ID and action name.
+     *
+     * @param GridField $grid
+     * @param HTTPRequest $request
+     * @return string JSON response
+     */
+    public function handleGroupAction($grid, $request)
+    {
+        // Only supported in DataObject mode
+        if (!$this->isDataObjectMode()) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Group actions are only supported in DataObject mode',
+            ]);
+        }
+
+        // Permission check
+        $form = $grid->getForm();
+        $record = $form ? $form->getRecord() : null;
+
+        if (!$record || !$record->canEdit()) {
+            $this->httpError(403, 'Permission denied');
+        }
+
+        // Get action parameters from URL
+        $groupID = (int) $request->param('GroupID');
+        $actionName = $request->param('ActionName');
+
+        if (!$groupID || !$actionName) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Missing group ID or action name',
+            ]);
+        }
+
+        // Check if action is registered
+        if (!isset($this->groupActions[$actionName])) {
+            return json_encode([
+                'success' => false,
+                'message' => "Unknown action: $actionName",
+            ]);
+        }
+
+        // Get the group DataObject
+        $relationName = $this->groupsRelation;
+        $groupList = $record->$relationName();
+        $group = $groupList->byID($groupID);
+
+        if (!$group) {
+            return json_encode([
+                'success' => false,
+                'message' => "Group not found: $groupID",
+            ]);
+        }
+
+        try {
+            // Extension hook before action
+            $this->extend('onBeforeGroupAction', $grid, $group, $actionName, $record);
+
+            // Execute the action handler
+            $action = $this->groupActions[$actionName];
+            $handler = $action['handler'];
+            $result = $handler($grid, $group, $record);
+
+            // Normalize result
+            if (!is_array($result)) {
+                $result = [
+                    'success' => (bool) $result,
+                    'message' => $result ? 'Action completed' : 'Action failed',
+                ];
+            }
+
+            // Extension hook after action
+            $this->extend('onAfterGroupAction', $grid, $group, $actionName, $result, $record);
+
+            // Add HTML if no redirect
+            if (!isset($result['redirect']) || !$result['redirect']) {
+                $result['html'] = $grid->FieldHolder();
+            }
+
+            return json_encode($result);
+
+        } catch (Exception $e) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Error executing action: ' . $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Handle group deletion request (DataObject mode only).
+     *
+     * Behavior depends on deleteMode:
+     * - 'unassign': Unassign items from group, then delete group
+     * - 'prevent': Return error if items are assigned to group
+     * - 'callback': Use custom handler
+     *
+     * @param GridField $grid
+     * @param HTTPRequest $request
+     * @return string JSON response
+     */
+    public function handleGroupDelete($grid, $request)
+    {
+        // Only supported in DataObject mode
+        if (!$this->isDataObjectMode()) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Group deletion is only supported in DataObject mode',
+            ]);
+        }
+
+        // Permission check
+        $form = $grid->getForm();
+        $record = $form ? $form->getRecord() : null;
+
+        if (!$record || !$record->canEdit()) {
+            $this->httpError(403, 'Permission denied');
+        }
+
+        // Get group ID from URL
+        $groupID = (int) $request->param('GroupID');
+
+        if (!$groupID) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Missing group ID',
+            ]);
+        }
+
+        // Get the group DataObject
+        $relationName = $this->groupsRelation;
+        $groupList = $record->$relationName();
+        $group = $groupList->byID($groupID);
+
+        if (!$group) {
+            return json_encode([
+                'success' => false,
+                'message' => "Group not found: $groupID",
+            ]);
+        }
+
+        // Get items assigned to this group
+        $list = $grid->getList();
+        $groupField = $this->getOption('groupField');
+        $itemsInGroup = $list->filter($groupField, $groupID);
+
+        try {
+            // Extension hook before deletion
+            $this->extend('onBeforeDeleteGroup', $grid, $group, $itemsInGroup, $record);
+
+            $result = null;
+
+            switch ($this->deleteMode) {
+                case 'prevent':
+                    if ($itemsInGroup->count() > 0) {
+                        return json_encode([
+                            'success' => false,
+                            'message' => sprintf(
+                                'Cannot delete group "%s": %d item(s) are still assigned',
+                                $group->{$this->groupTitleField},
+                                $itemsInGroup->count()
+                            ),
+                        ]);
+                    }
+                    // No items, safe to delete
+                    $group->delete();
+                    $result = [
+                        'success' => true,
+                        'message' => 'Group deleted successfully',
+                    ];
+                    break;
+
+                case 'callback':
+                    if ($this->groupDeleteHandler) {
+                        $handler = $this->groupDeleteHandler;
+                        $result = $handler($grid, $group, $itemsInGroup);
+
+                        // Normalize result
+                        if (!is_array($result)) {
+                            $result = [
+                                'success' => (bool) $result,
+                                'message' => $result ? 'Group deleted' : 'Deletion failed',
+                            ];
+                        }
+                    } else {
+                        return json_encode([
+                            'success' => false,
+                            'message' => 'Callback mode requires a delete handler',
+                        ]);
+                    }
+                    break;
+
+                case 'unassign':
+                default:
+                    // Unassign items from the group
+                    foreach ($itemsInGroup as $item) {
+                        if ($list instanceof ManyManyList && array_key_exists($groupField, $list->getExtraFields())) {
+                            // Update many_many extra field
+                            $list->add($item, [$groupField => null]);
+                        } else {
+                            // Update field on item
+                            $item->$groupField = null;
+                            $item->write();
+                        }
+                    }
+
+                    // Remove group from relation and delete
+                    $groupList->remove($group);
+                    $group->delete();
+
+                    $result = [
+                        'success' => true,
+                        'message' => sprintf(
+                            'Group deleted. %d item(s) unassigned.',
+                            $itemsInGroup->count()
+                        ),
+                    ];
+                    break;
+            }
+
+            // Extension hook after deletion
+            $this->extend('onAfterDeleteGroup', $grid, $group, $result, $record);
+
+            // Add updated HTML
+            $result['html'] = $grid->FieldHolder();
+
+            return json_encode($result);
+
+        } catch (Exception $e) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Error deleting group: ' . $e->getMessage(),
+            ]);
+        }
     }
 
     public function handleSave(GridField $grid, DataObjectInterface $record)
