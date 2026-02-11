@@ -83,6 +83,40 @@ class GridFieldGroupable
      */
     protected $dividerTemplate = 'GFGroupableDivider';
 
+    // ========================================
+    // DataObject Groups Mode (Phase 1)
+    // ========================================
+
+    /**
+     * Relation name on source record for DataObject groups (has_many/many_many).
+     * When set, enables DataObject mode instead of MultiValueField mode.
+     */
+    protected ?string $groupsRelation = null;
+
+    /**
+     * Field on group DataObject that provides the display name.
+     * Default: 'Title'
+     */
+    protected string $groupTitleField = 'Title';
+
+    /**
+     * Additional fields from group DataObject to serialize for JS template.
+     * These become available as {%=o.groupMeta.FieldName%} in templates.
+     */
+    protected array $groupMetadataFields = [];
+
+    /**
+     * Whether the item field stores a FK ID (DataObject mode) or string key (legacy mode).
+     * Automatically set to true when setGroupsFromRelation() is called.
+     */
+    protected bool $groupFieldIsFK = false;
+
+    /**
+     * Sort field for groups (on DataObject or many_many relation).
+     * Inspired by GridFieldOrderableRows::$sortField.
+     */
+    protected ?string $groupSortField = null;
+
     /**
      * @param string $groupField field on subjects to hold group key
      * @param string $groupFieldLabel label for field on subjects to hold group key
@@ -128,6 +162,122 @@ class GridFieldGroupable
         return $this->$option;
     }
 
+    // ========================================
+    // DataObject Groups Mode Setters/Getters
+    // ========================================
+
+    /**
+     * Configure groups from a DataObject relation (has_many or many_many).
+     * This enables DataObject mode and automatically sets groupFieldIsFK = true.
+     *
+     * @param string $relationName The relation name on the source record
+     * @return $this
+     */
+    public function setGroupsFromRelation(string $relationName): self
+    {
+        $this->groupsRelation = $relationName;
+        $this->groupFieldIsFK = true;
+        return $this;
+    }
+
+    /**
+     * Get the relation name for DataObject groups.
+     */
+    public function getGroupsRelation(): ?string
+    {
+        return $this->groupsRelation;
+    }
+
+    /**
+     * Set which field on the group DataObject provides the display name.
+     *
+     * @param string $field Field name (default: 'Title')
+     * @return $this
+     */
+    public function setGroupTitleField(string $field): self
+    {
+        $this->groupTitleField = $field;
+        return $this;
+    }
+
+    /**
+     * Get the title field for group DataObjects.
+     */
+    public function getGroupTitleField(): string
+    {
+        return $this->groupTitleField;
+    }
+
+    /**
+     * Set additional fields from group DataObject to serialize for JS template.
+     * These become available as {%=o.groupMeta.FieldName%} in templates.
+     *
+     * @param array $fields List of field names
+     * @return $this
+     */
+    public function setGroupMetadataFields(array $fields): self
+    {
+        $this->groupMetadataFields = $fields;
+        return $this;
+    }
+
+    /**
+     * Get the metadata fields for group DataObjects.
+     */
+    public function getGroupMetadataFields(): array
+    {
+        return $this->groupMetadataFields;
+    }
+
+    /**
+     * Set whether the item field stores a FK ID (true) or string key (false).
+     * This is automatically set to true when setGroupsFromRelation() is called.
+     *
+     * @param bool $isFK
+     * @return $this
+     */
+    public function setGroupFieldIsFK(bool $isFK): self
+    {
+        $this->groupFieldIsFK = $isFK;
+        return $this;
+    }
+
+    /**
+     * Check if item field stores FK ID (DataObject mode).
+     */
+    public function getGroupFieldIsFK(): bool
+    {
+        return $this->groupFieldIsFK;
+    }
+
+    /**
+     * Set the sort field for groups (on DataObject or many_many relation).
+     * Inspired by GridFieldOrderableRows::setSortField().
+     *
+     * @param string $field Sort field name
+     * @return $this
+     */
+    public function setGroupSortField(string $field): self
+    {
+        $this->groupSortField = $field;
+        return $this;
+    }
+
+    /**
+     * Get the sort field for groups.
+     */
+    public function getGroupSortField(): ?string
+    {
+        return $this->groupSortField;
+    }
+
+    /**
+     * Check if this component is in DataObject mode (vs MultiValueField mode).
+     */
+    public function isDataObjectMode(): bool
+    {
+        return $this->groupsRelation !== null;
+    }
 
     /**
      * Convenience function to have the requirements included
@@ -167,13 +317,43 @@ class GridFieldGroupable
         $grid->setAttribute('data-groupable-role', $this->getOption('groupFieldLabel'));
         $grid->setAttribute('data-groupable-itemfield', $this->getOption('groupField'));
 
-        // Get groups from source record if string MultiValueField name
-//        $grid->setAttribute('data-groupable-groups', json_encode( $this->getOption('groupsAvailable') ) );
-        $groups = $this->getOption('groupsAvailable');
-        if (!$groups && $this->groupsFieldOnSource && ($form = $grid->getForm()) && ($record = $form->getRecord())) { //&& $record->hasDatabaseField($groups)
-            $groups = $record->dbObject($this->groupsFieldOnSource)->getValues();
+        // Get groups - either from DataObject relation or MultiValueField
+        $groups = [];
+        $mode = 'multivalue'; // default mode
+
+        if ($this->isDataObjectMode() && ($form = $grid->getForm()) && ($record = $form->getRecord())) {
+            // DataObject mode: load groups from has_many/many_many relation
+            $mode = 'dataobject';
+            $relationName = $this->groupsRelation;
+            $groupList = $record->$relationName();
+
+            // Apply sorting if configured
+            if ($this->groupSortField) {
+                $groupList = $groupList->sort($this->groupSortField);
+            }
+
+            // Serialize groups with metadata
+            foreach ($groupList as $group) {
+                $groupData = [
+                    'id' => $group->ID,
+                    'name' => $group->{$this->groupTitleField},
+                ];
+                // Add configured metadata fields
+                foreach ($this->groupMetadataFields as $field) {
+                    $groupData[$field] = $group->$field;
+                }
+                $groups[$group->ID] = $groupData;
+            }
+        } else {
+            // Legacy mode: MultiValueField or static array
+            $groups = $this->getOption('groupsAvailable');
+            if (!$groups && $this->groupsFieldOnSource && ($form = $grid->getForm()) && ($record = $form->getRecord())) {
+                $groups = $record->dbObject($this->groupsFieldOnSource)->getValues();
+            }
         }
+
         $grid->setAttribute('data-groupable-groups', json_encode($groups));
+        $grid->setAttribute('data-groupable-mode', $mode);
 
         // insert divider js tmpl
         $groupsField = (is_string($this->getOption('groupsFieldOnSource')) ? $this->getOption('groupsFieldOnSource') : '');
@@ -181,6 +361,7 @@ class GridFieldGroupable
             'ColSpan' => $grid->getColumnCount() - 1,
             'GroupFieldLabel' => $this->groupFieldLabel,
             'GroupsFieldNameOnSource' => $groupsField,
+            'IsDataObjectMode' => $this->isDataObjectMode(),
         ]);
 
         return [
@@ -211,25 +392,26 @@ class GridFieldGroupable
 
         $item_id = $request->postVar('groupable_item_id');
         $group_key = $request->postVar('groupable_group_key');
-        if ($group_key == 'none') {
-            $group_key = '';
+
+        // Process group_key based on mode
+        if ($this->groupFieldIsFK) {
+            // DataObject mode: store FK ID (integer) or null for unassigned
+            $group_key = ($group_key === 'none' || $group_key === '' || $group_key === null)
+                ? null
+                : (int) $group_key;
+        } else {
+            // Legacy mode: store string key, empty string for unassigned
+            if ($group_key == 'none') {
+                $group_key = '';
+            }
         }
+
         $item = $list->byID($item_id);
         $groupField = $this->getOption('groupField');
 
-
-//        // only update  if we have an actual item (not if a boundary/whole group was dragged)
-//        if(!$item) return $grid->FieldHolder();
         if ($item) {
-
-            // Update item with correct Group assigned (custom query required to write m_m_extraField)
-            //        DB::query(sprintf(
-            //            "UPDATE `%s` SET `%s` = '%s' WHERE `BlockID` = %d",
-            //            'SiteTree_Blocks',
-            //            'BlockArea',
-            //            $group_key,
-            //            $item_id
-            //        ));
+            // Extension hook before assignment
+            $this->extend('onBeforeAssignGroupItems', $list, $item, $group_key);
 
             if ($list instanceof ManyManyList && array_key_exists($groupField, $list->getExtraFields())) {
                 // update many_many_extrafields (MMList->add() with a new item adds a row, with existing item modifies a row)
@@ -240,7 +422,8 @@ class GridFieldGroupable
                 $item->write();
             }
 
-            $this->extend('onAfterAssignGroupItems', $list);
+            // Extension hook after assignment
+            $this->extend('onAfterAssignGroupItems', $list, $item, $group_key);
 
         } else {
             // boundary was dragged
@@ -310,7 +493,22 @@ class GridFieldGroupable
                 if (!array_key_exists($item->ID, $groupData)) continue;
                 if (!array_key_exists($groupField, $groupData[$item->ID])) continue;
                 $group_key = $groupData[$item->ID][$groupField];
+
+                // Process group_key based on mode
+                if ($this->groupFieldIsFK) {
+                    // DataObject mode: store FK ID (integer) or null for unassigned
+                    $group_key = ($group_key === 'none' || $group_key === '' || $group_key === null)
+                        ? null
+                        : (int) $group_key;
+                } else {
+                    // Legacy mode: store string key, empty string for unassigned
+                    if ($group_key == 'none') {
+                        $group_key = '';
+                    }
+                }
+
                 if ($item->$groupField == $group_key) continue; // skip unchanged
+
                 // update
                 if ($list instanceof ManyManyList && array_key_exists($groupField, $list->getExtraFields())) {
                     // update many_many_extrafields (MMList->add() with a new item adds a row, with existing item modifies a row)

@@ -22,6 +22,9 @@
 
             ApplyEnhancements: false,
 
+            // Mode: 'multivalue' (legacy) or 'dataobject'
+            GroupMode: 'multivalue',
+
             //onmatch: function() {
             onadd: function() {
                 var self = this; // this & self are already a jQuery obj
@@ -34,16 +37,30 @@
                 var noGroupName = self.getGridField().data('groupable-unassigned');
                 if(noGroupName){ this.setNoGroupName( noGroupName ); }
 
+                // Detect mode: 'multivalue' (legacy) or 'dataobject'
+                var mode = self.getGridField().data('groupable-mode') || 'multivalue';
+                this.setGroupMode(mode);
+
                 var groups = self.getGridField().data('groupable-groups'); // valid json, already parsed by jQ
                 // get from add-new-button if exists, allows for dynamic updating via ajax as only the grid's CONTENT gets
                 // reloaded via Ajax (not the grid itself, which thus wouldn't contain the newly added group)
                 groups = $('.ss-gridfield-add-new-group').data('groups-available') ?? groups;
 
-                // add empty/unset group
+                // add empty/unset group based on mode
                 if(groups && Object.keys( groups ).length){
-                    groups[''] = this.getNoGroupName();
+                    if (mode === 'dataobject') {
+                        // DataObject mode: empty group is an object with special key
+                        groups[''] = { id: null, name: this.getNoGroupName() };
+                    } else {
+                        // Legacy mode: empty group is just a string
+                        groups[''] = this.getNoGroupName();
+                    }
                 } else {
-                    groups = { '' : this.getNoGroupName() }
+                    if (mode === 'dataobject') {
+                        groups = { '' : { id: null, name: this.getNoGroupName() } };
+                    } else {
+                        groups = { '' : this.getNoGroupName() };
+                    }
                 }
                 this.setAvailableGroups(groups);
 
@@ -53,20 +70,38 @@
 
                 // insert blockAreas boundaries
                 var groupBoundElements = [];
-                $.each(groups, function(groupKey, groupName) {
+                $.each(groups, function(groupKey, groupData) {
                     var th_tds_list = self.siblings('thead').find('tr').map(function() {
                         return $(this).find('th').length;
                     }).get();
 
-                    var data = {
-                        "groupName": (groupName || self.getNoGroupName()),
-                        "groupKey" : groupKey,
-                    };
+                    // Build template data based on mode
+                    var data;
+                    if (mode === 'dataobject' && typeof groupData === 'object') {
+                        // DataObject mode: groupData is an object with name, id, and metadata
+                        data = {
+                            "groupName": groupData.name || self.getNoGroupName(),
+                            "groupKey": groupKey,
+                            "groupId": groupData.id || null,
+                            "groupMeta": groupData  // Pass full object for template access
+                        };
+                    } else {
+                        // Legacy mode: groupData is just a string (the name)
+                        data = {
+                            "groupName": (groupData || self.getNoGroupName()),
+                            "groupKey": groupKey,
+                            "groupId": null,
+                            "groupMeta": {}
+                        };
+                    }
+
                     var boundTmpl = window.tmpl('groupable_divider_template', data);
                     var boundEl = $(boundTmpl);
 
                     boundEl.data('groupKey', data.groupKey); // used for assigning group to item when dragging into group
                     boundEl.data('groupName', data.groupName); // make available for convenience
+                    boundEl.data('groupId', data.groupId); // DataObject ID (null for legacy mode)
+                    boundEl.data('groupMeta', data.groupMeta); // Full metadata object
                     groupBoundElements[groupKey] = boundEl;
                     $(self).append(boundEl); //before(bound);
 
