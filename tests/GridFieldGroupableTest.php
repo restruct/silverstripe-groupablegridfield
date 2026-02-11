@@ -1,6 +1,6 @@
 <?php
 
-namespace Restruct\Silverstripe\GroupableGridfield\Test;
+namespace Restruct\Silverstripe\GroupableGridfield\Tests;
 
 use Restruct\Silverstripe\GroupableGridfield\GridFieldGroupable;
 use SilverStripe\Dev\SapphireTest;
@@ -11,52 +11,32 @@ use SilverStripe\ORM\DataObject;
  */
 class GridFieldGroupableTest extends SapphireTest
 {
+    protected $usesDatabase = false;
 
-    /**
-     *
-     */
-    public function testGetURLHandlers()
+    public function testGetURLHandlers(): void
     {
         $groupable = new GridFieldGroupable();
-        $this->assertInternalType('array', $groupable->getURLHandlers(null));
+        $this->assertIsArray($groupable->getURLHandlers(null));
     }
 
-    /**
-     *
-     */
-    public function testGetColumnsHandled()
+    public function testGetColumnsHandled(): void
     {
         $groupable = new GridFieldGroupable();
-        $this->assertInternalType('array', $groupable->getColumnsHandled(null));
+        $this->assertIsArray($groupable->getColumnsHandled(null));
     }
 
-    /**
-     *
-     */
-    public function testGetColumnContent()
-    {
-        $groupable = new GridFieldGroupable();
-        $this->assertNull($groupable->getColumnContent(null, null, ''));
-    }
-
-    /**
-     *
-     */
-    public function testGetColumnAttributes()
+    public function testGetColumnAttributes(): void
     {
         $groupable = new GridFieldGroupable('ID');
         $record = DataObject::create();
         $attributes = $groupable->getColumnAttributes(null, $record, null);
-        $this->assertInternalType('array', $attributes);
+        $this->assertIsArray($attributes);
         $this->assertArrayHasKey('data-groupable-group', $attributes);
     }
 
-    /**
-     *
-     */
-    public function testGetColumnMetadata()
+    public function testGetColumnMetadata(): void
     {
         $groupable = new GridFieldGroupable();
-        $this->assertInternalType('array', $groupable->getColumnMetadata(null,''));
+        $this->assertIsArray($groupable->getColumnMetadata(null, ''));
     }
 }

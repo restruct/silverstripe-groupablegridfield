@@ -71,6 +71,12 @@ class GridFieldGroupable
     protected $groupsFieldOnSource;
 
     /**
+     * If true, group assignments are saved immediately via AJAX.
+     * If false, they are saved when the form is submitted.
+     */
+    public bool $immediateUpdate = true;
+
+    /**
      * The row template to render this with
      *
      * @var string
@@ -257,7 +263,7 @@ class GridFieldGroupable
         }
 
         // Forward the request to GridFieldOrderableRows::handleReorder (if GridFieldOrderableRows)
-        $orderableRowsComponent = $grid->getConfig()->getComponentByType('GridFieldOrderableRows');
+        $orderableRowsComponent = $grid->getConfig()->getComponentByType(GridFieldOrderableRows::class);
         if ($orderableRowsComponent && $orderableRowsComponent->immediateUpdate) {
             return $orderableRowsComponent->handleReorder($grid, $request);
         } else {

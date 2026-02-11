@@ -1,17 +1,22 @@
 # SilverStripe GridField Groupable
-[![Build Status](https://travis-ci.org/restruct/silverstripe-groupable-gridfield.svg?branch=master)](https://travis-ci.org/restruct/silverstripe-groupable-gridfield)
-[![codecov.io](https://codecov.io/github/restruct/silverstripe-groupable-gridfield/coverage.svg?branch=master)](https://codecov.io/github/restruct/silverstripe-groupable-gridfield?branch=master)
 
-This module facilitates drag & drop grouping of items in a GridField.   
-It bolts on top of- and depends on GridFieldOrderableRows for the drag & drop sorting functionality.  
-Allows adding new 'groups' on the fly when configured with a MultiValueField to store them.  
-Groups themselves can also be reordered (drag-drop, experimental). 
+This module facilitates drag & drop grouping of items in a GridField.
+It bolts on top of- and depends on GridFieldOrderableRows for the drag & drop sorting functionality.
+Allows adding new 'groups' on the fly when configured with a MultiValueField to store them.
+Groups themselves can also be reordered (drag-drop, experimental).
 
 <img width="784" height="559" alt="groupable" src="https://github.com/user-attachments/assets/caeca7e8-cc46-4c5d-9b54-93d92f4ba6a6" />
 
-## NOTE: currently slightly 'WIP'
-We found a (Silverstripe 3) project in which quite a lot of development was done on this module which never got published (a.o. group reordering). These updates + additions have now been included + updated in this module but may still need a bit of work/debugging.
-- **Updated namespace** `micsck\GroupableGridfield` -> `Restruct\Silverstripe\Gridfield`
+## Version Compatibility
+
+| Branch | Module Version | Silverstripe | PHP |
+|--------|----------------|--------------|-----|
+| `master` | `3.x` | ^6.0 | ^8.3 |
+| `v2` | `2.x` | ^4.0 \|\| ^5.0 | ^8.1 |
+| `v1` | `1.x` | ^4.0 | ^7.4 \|\| ^8.0 |
+| - | `0.x` | ^3.0 | ^5.6 \|\| ^7.0 |
+
+**Note:** `composer.json` is the source of truth for exact version constraints.
 
 ## Usage:
 ```php
