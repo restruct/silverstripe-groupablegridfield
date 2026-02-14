@@ -41,26 +41,40 @@
                 var mode = self.getGridField().data('groupable-mode') || 'multivalue';
                 this.setGroupMode(mode);
 
-                var groups = self.getGridField().data('groupable-groups'); // valid json, already parsed by jQ
+                var groupsRaw = self.getGridField().data('groupable-groups'); // valid json, already parsed by jQ
                 // get from add-new-button if exists, allows for dynamic updating via ajax as only the grid's CONTENT gets
                 // reloaded via Ajax (not the grid itself, which thus wouldn't contain the newly added group)
-                groups = $('.ss-gridfield-add-new-group').data('groups-available') ?? groups;
+                groupsRaw = $('.ss-gridfield-add-new-group').data('groups-available') ?? groupsRaw;
 
-                // add empty/unset group based on mode
-                if(groups && Object.keys( groups ).length){
-                    if (mode === 'dataobject') {
-                        // DataObject mode: empty group is an object with special key
-                        groups[''] = { id: null, name: this.getNoGroupName() };
+                // Convert array format to object format while preserving order for iteration
+                // PHP sends array to preserve sort order (JS objects sort numeric keys)
+                var groups = {};        // Object keyed by ID for lookups
+                var groupsOrdered = []; // Array preserving sort order for iteration
+                var noGroupData = mode === 'dataobject'
+                    ? { id: null, name: this.getNoGroupName() }
+                    : this.getNoGroupName();
+
+                if (groupsRaw && (Array.isArray(groupsRaw) ? groupsRaw.length : Object.keys(groupsRaw).length)) {
+                    if (Array.isArray(groupsRaw)) {
+                        // New array format from PHP (preserves order)
+                        groupsRaw.forEach(function(groupData) {
+                            var key = groupData.id || '';
+                            groups[key] = groupData;
+                            groupsOrdered.push({ key: key, data: groupData });
+                        });
                     } else {
-                        // Legacy mode: empty group is just a string
-                        groups[''] = this.getNoGroupName();
+                        // Legacy object format (order may be wrong due to numeric key sorting)
+                        $.each(groupsRaw, function(groupKey, groupData) {
+                            groups[groupKey] = groupData;
+                            groupsOrdered.push({ key: groupKey, data: groupData });
+                        });
                     }
+                    // Add empty group at the end
+                    groups[''] = noGroupData;
+                    groupsOrdered.push({ key: '', data: noGroupData });
                 } else {
-                    if (mode === 'dataobject') {
-                        groups = { '' : { id: null, name: this.getNoGroupName() } };
-                    } else {
-                        groups = { '' : this.getNoGroupName() };
-                    }
+                    groups[''] = noGroupData;
+                    groupsOrdered.push({ key: '', data: noGroupData });
                 }
                 this.setAvailableGroups(groups);
 
@@ -68,14 +82,18 @@
                 var initialIdOrder = self.getGridField().getItems()
                     .map(function() { return $(this).data("id"); }).get();
 
-                // insert blockAreas boundaries
+                // insert blockAreas boundaries (use ordered array to preserve sort order)
                 var groupBoundElements = [];
-                $.each(groups, function(groupKey, groupData) {
+                $.each(groupsOrdered, function(index, item) {
+                    var groupKey = item.key;
+                    var groupData = item.data;
                     var th_tds_list = self.siblings('thead').find('tr').map(function() {
                         return $(this).find('th').length;
                     }).get();
 
                     // Build template data based on mode
+                    // Note: jQuery .data() auto-converts "true"/"false" strings to booleans
+                    var editableTitle = self.getGridField().data('groupable-editable-title') == true;
                     var data;
                     if (mode === 'dataobject' && typeof groupData === 'object') {
                         // DataObject mode: groupData is an object with name, id, and metadata
@@ -83,7 +101,8 @@
                             "groupName": groupData.name || self.getNoGroupName(),
                             "groupKey": groupKey,
                             "groupId": groupData.id || null,
-                            "groupMeta": groupData  // Pass full object for template access
+                            "groupMeta": groupData,  // Pass full object for template access
+                            "editableTitle": editableTitle
                         };
                     } else {
                         // Legacy mode: groupData is just a string (the name)
@@ -91,7 +110,8 @@
                             "groupName": (groupData || self.getNoGroupName()),
                             "groupKey": groupKey,
                             "groupId": null,
-                            "groupMeta": {}
+                            "groupMeta": {},
+                            "editableTitle": false  // Never editable in legacy mode
                         };
                     }
 
@@ -188,13 +208,34 @@
 
                         // Post new group order to server
                         if (groupOrder.length > 0 && grid.data("immediate-update")) {
-                            var reorderData = groupOrder.map(function(id) {
-                                return { name: 'group_order[]', value: id };
-                            });
+                            var reorderUrl = grid.data("url-group-reorder");
 
-                            grid.reload({
-                                url: grid.data("url-group-reorder"),
-                                data: reorderData
+                            $.ajax({
+                                url: reorderUrl,
+                                type: 'POST',
+                                data: { 'group_order': groupOrder },
+                                dataType: 'json',
+                                success: function(response) {
+                                    if (response.success) {
+                                        // Show message if provided
+                                        if (response.message && typeof ss !== 'undefined' && ss.StatusMessage) {
+                                            ss.StatusMessage(response.message);
+                                        }
+                                        // Optionally reload with new HTML
+                                        if (response.html) {
+                                            grid.replaceWith(response.html);
+                                        }
+                                    } else {
+                                        alert(response.message || 'Reorder failed');
+                                        // Reload to restore original order
+                                        grid.reload();
+                                    }
+                                },
+                                error: function(xhr, status, error) {
+                                    console.error('Error reordering groups:', error);
+                                    alert('Error reordering groups: ' + error);
+                                    grid.reload();
+                                }
                             });
                             return; // Don't continue to item reordering
                         }
@@ -259,14 +300,66 @@
                 });
 
                 // Area-assignment forwards the request to gridfieldextensions::reorder server side
-                // (NOTE: don't call original sort callback from JS to prevent double reload, instead request gets forwarded via PHP)
                 // Check if we are allowed to postback
                 if (grid.data("immediate-update") && data) {
-                    grid.reload({
-                        //url: grid.data("url-reorder"),
-                        url: grid.data("url-group-assignment"),
-                        data: data
-                    });
+                    // Check if we should avoid full refresh (preserves unsaved EditableColumns edits)
+                    var softRefresh = grid.data("groupable-soft-refresh") === true || grid.data("groupable-soft-refresh") === 'true';
+
+                    if (softRefresh) {
+                        // Collect form data the same way grid.reload() does
+                        // This sends full GridField state including GridFieldEditableColumns data
+                        var form = grid.closest('form');
+                        var formData = form.find(':input').serializeArray();
+
+                        // Add the order[] array (built earlier, not in form inputs)
+                        data.forEach(function(item) {
+                            formData.push(item);
+                        });
+
+                        // Add groupable-specific data
+                        formData.push({ name: 'groupable_item_id', value: ui.item.data("id") });
+                        formData.push({ name: 'groupable_group_key', value: groupKey });
+
+                        $.ajax({
+                            url: grid.data("url-group-assignment"),
+                            type: 'POST',
+                            data: $.param(formData),
+                            dataType: 'text', // handleGroupAssignment returns HTML
+                            headers: {
+                                'X-Requested-With': 'XMLHttpRequest'
+                            },
+                            success: function(response) {
+                                // Check if response indicates an error (HTML error page)
+                                if (response.indexOf('ERROR') !== -1 || response.indexOf('error') !== -1) {
+                                    console.error('Server returned error in response');
+                                    // Mark as changed since save failed but DOM state is different
+                                    var cmsForm = $('.cms-edit-form');
+                                    cmsForm.addClass('changed');
+                                } else {
+                                    // Success - data was saved, no need to mark form dirty
+                                    if (typeof ss !== 'undefined' && ss.StatusMessage) {
+                                        ss.StatusMessage('Item moved and saved');
+                                    }
+                                }
+                            },
+                            error: function(xhr, status, error) {
+                                console.error('Error saving item position:', error, xhr.responseText);
+                                // Don't alert on every error - just log and mark form as changed
+                                // The user can save the form to persist changes
+                                var cmsForm = $('.cms-edit-form');
+                                cmsForm.addClass('changed');
+                                if (typeof ss !== 'undefined' && ss.StatusMessage) {
+                                    ss.StatusMessage('Position changed (will save with form)', 'warning');
+                                }
+                            }
+                        });
+                    } else {
+                        // Full reload (original behavior)
+                        grid.reload({
+                            url: grid.data("url-group-assignment"),
+                            data: data
+                        });
+                    }
                 } else {
                     // Tells the user they have unsaved changes when they
                     // try and leave the page after sorting, also updates the
@@ -280,34 +373,77 @@
             applyenhancedsorthelper: function(){
                 // Enhance helper function to support groups of items
                 var mainHelper = this.sortable('option', 'helper');
+                var grid = this;
 
-                var enhancedHelper = function(e, row) {
-                    if(!row) return;
-
-                    // drag multiple in group
-                    if (row.hasClass('groupable-advanced-bound')) {
-                        //Clone the selected items into an array
-                        var drag_target = row;
-                        var group_items = row.nextUntil('.groupable-advanced-bound').addBack().clone();
-                        // Add a property to `row` called 'multidrag` that contains the
-                        // selected items, then remove the selected items from the source list
-                        row.data('multidrag', group_items).data('original',drag_target);
-                        row.nextUntil('.groupable-advanced-bound').remove();
-
-                        // Now the selected items exist in memory, attached to the `item`,
-                        // so we can access them later when we get to the `stop()` callback
-
-                        // Create the helper
-                        var helper = $('<div/>');
-                        return helper.append(group_items);
-                    } else {
-                        // return existing/regular helper
+                // Helper to invoke the original helper (handles string vs function)
+                var invokeMainHelper = function(e, row) {
+                    if (typeof mainHelper === 'function') {
                         return mainHelper(e, row);
+                    } else if (mainHelper === 'clone') {
+                        return row.clone();
+                    } else {
+                        // 'original' or fallback
+                        return row;
                     }
                 };
 
-                // Apply enhancedHelper to (OrderableRows) sortable
-                this.sortable({ 'helper': enhancedHelper });
+                var enhancedHelper = function(e, row) {
+                    if (!row) return;
+
+                    // drag multiple in group (only for actual groups with groupable-advanced-bound)
+                    if (row.hasClass('groupable-advanced-bound')) {
+                        // Clone the selected items into an array (row + all items until next group boundary)
+                        // Use .groupable-bound to stop at ANY boundary including "unassigned" group
+                        var drag_target = row;
+                        var group_items = row.nextUntil('.groupable-bound').addBack().clone();
+
+                        // Store clones for restore, and reference to original
+                        row.data('multidrag', group_items).data('original', drag_target);
+
+                        // Remove the items from source (not the row - sortable manages that)
+                        row.nextUntil('.groupable-bound').remove();
+
+                        // Create the helper - simple div containing the cloned items
+                        var helper = $('<div/>').append(group_items);
+                        return helper;
+                    } else {
+                        // return existing/regular helper
+                        return invokeMainHelper(e, row);
+                    }
+                };
+
+                // Restrict where groups can be dropped (only directly before other group boundaries)
+                var restrictGroupPlacement = function(event, ui) {
+                    // Only apply restriction when dragging a group
+                    if (!ui.item.hasClass('groupable-advanced-bound')) {
+                        return;
+                    }
+
+                    var placeholder = ui.placeholder;
+                    var next = placeholder.next();
+
+                    // Valid position: directly before a group boundary
+                    if (!next.hasClass('groupable-bound')) {
+                        // Find nearest group boundary below and snap to before it
+                        var nearestBoundBelow = placeholder.nextAll('.groupable-bound').first();
+                        if (nearestBoundBelow.length) {
+                            nearestBoundBelow.before(placeholder);
+                        } else {
+                            // No boundary below (we're in/after unassigned group)
+                            // Snap to before the last boundary (unassigned group)
+                            var lastBound = placeholder.prevAll('.groupable-bound').first();
+                            if (lastBound.length) {
+                                lastBound.before(placeholder);
+                            }
+                        }
+                    }
+                };
+
+                // Apply enhancedHelper and sort restriction to (OrderableRows) sortable
+                this.sortable({
+                    'helper': enhancedHelper,
+                    'sort': restrictGroupPlacement
+                });
             }
 
         });
@@ -602,6 +738,140 @@
                 });
 
                 return false;
+            }
+        });
+
+
+        /**
+         * Click-to-edit: click on title to start editing
+         */
+        $(".ss-gridfield .group-title-editable").entwine({
+            onclick: function() {
+                var input = this.next('.group-title-input');
+                if (input.length) {
+                    this.addClass('d-none');
+                    input.removeClass('d-none').addClass('d-inline-block').focus().select();
+                }
+            }
+        });
+
+        /**
+         * Group title input handlers (DataObject mode with editable titles)
+         */
+        $(".ss-gridfield .group-title-input").entwine({
+            // Track if edit was cancelled
+            Cancelled: false,
+
+            /**
+             * Save title on focus out (when input loses focus)
+             * Note: entwine doesn't support onblur, uses onfocusout instead
+             */
+            onfocusout: function() {
+                if (this.getCancelled()) {
+                    this.setCancelled(false);
+                    this._hideInput();
+                    return;
+                }
+                this._saveTitle();
+            },
+
+            /**
+             * Handle keyboard
+             */
+            onkeydown: function(e) {
+                if (e.keyCode === 13) { // Enter key - save
+                    e.preventDefault();
+                    this.blur();
+                } else if (e.keyCode === 27) { // Escape key - cancel
+                    e.preventDefault();
+                    this.val(this.data('original-value'));
+                    this.setCancelled(true);
+                    this.blur();
+                }
+            },
+
+            /**
+             * Hide input and show title wrapper
+             */
+            _hideInput: function() {
+                var titleWrapper = this.prev('.group-title-editable');
+                this.removeClass('d-inline-block').addClass('d-none');
+                titleWrapper.removeClass('d-none');
+            },
+
+            /**
+             * Save the title via AJAX
+             */
+            _saveTitle: function() {
+                var self = this;
+                var grid = this.getGridField();
+                var groupId = this.data('group-id');
+                var newTitle = this.val().trim();
+                var originalTitle = this.data('original-value');
+                var titleEl = this.prev('.group-title-editable').find('.group-title');
+
+                // Skip if unchanged - just hide
+                if (newTitle === originalTitle) {
+                    this._hideInput();
+                    return;
+                }
+
+                // Validate
+                if (!newTitle) {
+                    alert('Title cannot be empty');
+                    this.val(originalTitle);
+                    this._hideInput();
+                    return;
+                }
+
+                var updateUrl = grid.data('url-group-title-update');
+                if (!updateUrl) {
+                    console.error('No group title update URL found');
+                    this._hideInput();
+                    return;
+                }
+
+                // Build URL with group ID
+                var url = updateUrl + '/' + groupId;
+
+                // Disable input while processing
+                self.prop('disabled', true).addClass('loading');
+
+                $.ajax({
+                    url: url,
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ title: newTitle }),
+                    dataType: 'json',
+                    success: function(response) {
+                        if (response.success) {
+                            // Update the original value and displayed title
+                            self.data('original-value', newTitle);
+                            titleEl.text(newTitle);
+
+                            // Show message if provided
+                            if (response.message) {
+                                if (typeof ss !== 'undefined' && ss.StatusMessage) {
+                                    ss.StatusMessage(response.message);
+                                }
+                            }
+                        } else {
+                            alert(response.message || 'Update failed');
+                            // Revert to original value
+                            self.val(originalTitle);
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        console.error('Error updating group title:', error);
+                        alert('Error updating title: ' + error);
+                        // Revert to original value
+                        self.val(originalTitle);
+                    },
+                    complete: function() {
+                        self.prop('disabled', false).removeClass('loading');
+                        self._hideInput();
+                    }
+                });
             }
         });
 

@@ -39,6 +39,7 @@ class GridFieldGroupable
         'handleGroupReorder',
         'handleGroupAction',
         'handleGroupDelete',
+        'handleGroupTitleUpdate',
     ];
 
     /**
@@ -82,6 +83,13 @@ class GridFieldGroupable
      * If false, they are saved when the form is submitted.
      */
     public bool $immediateUpdate = true;
+
+    /**
+     * If true (default), saves item reorders without refreshing the full GridField.
+     * This preserves unsaved edits in EditableColumns.
+     * If false, full GridField refresh after each reorder.
+     */
+    public bool $softRefresh = true;
 
     /**
      * The row template to render this with
@@ -178,6 +186,26 @@ class GridFieldGroupable
      * Should return: ['success' => bool, 'message' => string]
      */
     protected ?Closure $groupDeleteHandler = null;
+
+    // ========================================
+    // Inline Title Editing (Phase 5)
+    // ========================================
+
+    /**
+     * Whether group title is editable inline.
+     * When true, an input field replaces the static title text.
+     */
+    protected bool $editableGroupTitle = false;
+
+    /**
+     * Custom handler for group title updates (DataObject mode only).
+     *
+     * Callback signature: (GridField $gridField, DataObject $sourceRecord, DataObject $group, string $newTitle)
+     * Should return: ['success' => bool, 'message' => string]
+     *
+     * If not set, updates the group's title field directly.
+     */
+    protected ?Closure $groupTitleUpdateHandler = null;
 
     /**
      * @param string $groupField field on subjects to hold group key
@@ -512,6 +540,75 @@ class GridFieldGroupable
         return $this->groupDeleteHandler;
     }
 
+    // ========================================
+    // Inline Title Editing Setters/Getters (Phase 5)
+    // ========================================
+
+    /**
+     * Enable or disable inline group title editing.
+     *
+     * When enabled, the group title becomes an editable input field.
+     * Changes are saved via AJAX when the input loses focus.
+     *
+     * @param bool $editable
+     * @param Closure|null $handler Optional custom handler for title updates
+     *        Receives: (GridField $gridField, DataObject $sourceRecord, DataObject $group, string $newTitle)
+     *        Returns: ['success' => bool, 'message' => string]
+     * @return $this
+     */
+    public function setEditableGroupTitle(bool $editable = true, ?Closure $handler = null): self
+    {
+        $this->editableGroupTitle = $editable;
+        if ($handler) {
+            $this->groupTitleUpdateHandler = $handler;
+        }
+        return $this;
+    }
+
+    /**
+     * Check if group title is editable.
+     */
+    public function isEditableGroupTitle(): bool
+    {
+        return $this->editableGroupTitle;
+    }
+
+    /**
+     * Get the custom title update handler.
+     */
+    public function getGroupTitleUpdateHandler(): ?Closure
+    {
+        return $this->groupTitleUpdateHandler;
+    }
+
+    // ========================================
+    // Soft Refresh Option
+    // ========================================
+
+    /**
+     * Enable or disable soft refresh mode.
+     *
+     * When enabled, item reorders save without refreshing the full GridField.
+     * This preserves unsaved edits in EditableColumns but doesn't update
+     * visual feedback like row order badges.
+     *
+     * @param bool $soft
+     * @return $this
+     */
+    public function setSoftRefresh(bool $soft = true): self
+    {
+        $this->softRefresh = $soft;
+        return $this;
+    }
+
+    /**
+     * Check if soft refresh is enabled.
+     */
+    public function isSoftRefresh(): bool
+    {
+        return $this->softRefresh;
+    }
+
     /**
      * Convenience function to have the requirements included
      */
@@ -531,6 +628,7 @@ class GridFieldGroupable
             'POST group_reorder' => 'handleGroupReorder',
             'POST group_action/$GroupID/$ActionName' => 'handleGroupAction',
             'POST group_delete/$GroupID' => 'handleGroupDelete',
+            'POST group_title_update/$GroupID' => 'handleGroupTitleUpdate',
         ];
     }
 
@@ -559,6 +657,9 @@ class GridFieldGroupable
         $grid->setAttribute('data-url-group-action', $grid->Link('group_action'));
         $grid->setAttribute('data-url-group-delete', $grid->Link('group_delete'));
         $grid->setAttribute('data-groupable-delete-mode', $this->deleteMode);
+        $grid->setAttribute('data-groupable-editable-title', $this->editableGroupTitle ? 'true' : 'false');
+        $grid->setAttribute('data-url-group-title-update', $grid->Link('group_title_update'));
+        $grid->setAttribute('data-groupable-soft-refresh', $this->softRefresh ? 'true' : 'false');
 
         // Serialize group actions for JS (without handlers)
         if ($this->hasGroupActions()) {
@@ -588,6 +689,8 @@ class GridFieldGroupable
             }
 
             // Serialize groups with metadata
+            // Use array (not object keyed by ID) to preserve sort order in JSON
+            // JavaScript objects sort numeric keys automatically, breaking our sort order
             foreach ($groupList as $group) {
                 $groupData = [
                     'id' => $group->ID,
@@ -597,7 +700,7 @@ class GridFieldGroupable
                 foreach ($this->groupMetadataFields as $field) {
                     $groupData[$field] = $group->$field;
                 }
-                $groups[$group->ID] = $groupData;
+                $groups[] = $groupData;
             }
         } else {
             // Legacy mode: MultiValueField or static array
@@ -707,13 +810,15 @@ class GridFieldGroupable
 
         }
 
-        // Forward the request to GridFieldOrderableRows::handleReorder (if GridFieldOrderableRows)
+        // Handle reordering via GridFieldOrderableRows
+        // JS now sends data in the same format as grid.reload(), so we can always use handleReorder
         $orderableRowsComponent = $grid->getConfig()->getComponentByType(GridFieldOrderableRows::class);
+
         if ($orderableRowsComponent && $orderableRowsComponent->immediateUpdate) {
             return $orderableRowsComponent->handleReorder($grid, $request);
-        } else {
-            return $grid->FieldHolder();
         }
+
+        return $grid->FieldHolder();
 
     }
 
@@ -972,6 +1077,9 @@ class GridFieldGroupable
             // Extension hook after reordering
             $this->extend('onAfterReorderGroups', $grid, $record, $groupList, $sortedIDs);
 
+            // Clear relation cache so FieldHolder renders with fresh data
+            $record->flushCache(true);
+
             return json_encode([
                 'success' => true,
                 'message' => 'Groups reordered successfully',
@@ -1222,6 +1330,116 @@ class GridFieldGroupable
             return json_encode([
                 'success' => false,
                 'message' => 'Error deleting group: ' . $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Handle group title update request (DataObject mode only).
+     *
+     * Updates the title field on the group DataObject.
+     * Supports custom handler for additional logic (e.g., FUSE sync).
+     *
+     * @param GridField $grid
+     * @param HTTPRequest $request
+     * @return string JSON response
+     */
+    public function handleGroupTitleUpdate($grid, $request)
+    {
+        // Only supported in DataObject mode
+        if (!$this->isDataObjectMode()) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Title update is only supported in DataObject mode',
+            ]);
+        }
+
+        // Check if title editing is enabled
+        if (!$this->editableGroupTitle) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Inline title editing is not enabled',
+            ]);
+        }
+
+        // Permission check
+        $form = $grid->getForm();
+        $record = $form ? $form->getRecord() : null;
+
+        if (!$record || !$record->canEdit()) {
+            $this->httpError(403, 'Permission denied');
+        }
+
+        // Get group ID from URL
+        $groupID = (int) $request->param('GroupID');
+
+        if (!$groupID) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Missing group ID',
+            ]);
+        }
+
+        // Get the new title from request body
+        $body = json_decode($request->getBody(), true);
+        $newTitle = trim($body['title'] ?? '');
+
+        if (empty($newTitle)) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Title cannot be empty',
+            ]);
+        }
+
+        // Get the group DataObject
+        $relationName = $this->groupsRelation;
+        $groupList = $record->$relationName();
+        $group = $groupList->byID($groupID);
+
+        if (!$group) {
+            return json_encode([
+                'success' => false,
+                'message' => "Group not found: $groupID",
+            ]);
+        }
+
+        try {
+            // Extension hook before title update
+            $this->extend('onBeforeGroupTitleUpdate', $grid, $group, $newTitle, $record);
+
+            if ($this->groupTitleUpdateHandler) {
+                // Use custom handler (for complex updates like FUSE sync)
+                $handler = $this->groupTitleUpdateHandler;
+                $result = $handler($grid, $record, $group, $newTitle);
+
+                // Normalize result
+                if (!is_array($result)) {
+                    $result = [
+                        'success' => (bool) $result,
+                        'message' => $result ? 'Title updated' : 'Update failed',
+                    ];
+                }
+            } else {
+                // Default: update the title field directly
+                $titleField = $this->groupTitleField;
+                $group->$titleField = $newTitle;
+                $group->write();
+
+                $result = [
+                    'success' => true,
+                    'message' => 'Title updated',
+                ];
+            }
+
+            // Extension hook after title update
+            $this->extend('onAfterGroupTitleUpdate', $grid, $group, $newTitle, $result, $record);
+
+            return json_encode($result);
+
+        } catch (Exception $e) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Error updating title: ' . $e->getMessage(),
             ]);
         }
     }

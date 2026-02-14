@@ -8,16 +8,7 @@
         </td>
 
         <td colspan="$ColSpan">
-            <span class="boundary-indicator">&darr;</span>
-            {$GroupFieldLabel}:
-            <strong class="group-title">{%=o.groupName%}</strong>
-
-            <%-- Render metadata badges if available --%>
-            {% if (o.groupMeta && o.groupMeta.Code) { %}
-            <span class="badge badge-secondary ml-2">{%=o.groupMeta.Code%}</span>
-            {% } %}
-
-            <%-- Action buttons area (only for actual groups, not the unassigned group) --%>
+            <%-- Action buttons area (floated right, must come first in DOM) --%>
             {% if (o.groupId) { %}
             <div class="group-actions float-right">
                 <%-- Delete button --%>
@@ -28,6 +19,33 @@
                         data-group-name="{%=o.groupName%}"></button>
                 <%-- Custom actions will be dynamically added by JavaScript based on data-groupable-actions --%>
             </div>
+            {% } %}
+
+            <span class="boundary-indicator">&darr;</span>
+            {$GroupFieldLabel}:
+            <%-- Title: click-to-edit when editableTitle is true --%>
+            {% if (o.groupId && o.editableTitle) { %}
+            <span class="group-title-editable" data-group-id="{%=o.groupId%}">
+                <strong class="group-title">{%=o.groupName%}</strong>
+            </span>
+            <input type="text"
+                   class="group-title-input form-control form-control-sm d-none"
+                   style="width: auto; min-width: 200px;"
+                   value="{%=o.groupName%}"
+                   data-original-value="{%=o.groupName%}"
+                   data-group-id="{%=o.groupId%}" />
+            {% } else { %}
+            <strong class="group-title" data-group-id="{%=o.groupId%}">{%=o.groupName%}</strong>
+            {% } %}
+
+            <%-- Render metadata badges if available --%>
+            {% if (o.groupMeta && o.groupMeta.Code) { %}
+            <span class="badge badge-secondary ml-2">{%=o.groupMeta.Code%}</span>
+            {% } %}
+
+            <%-- Render ContentSummary if available --%>
+            {% if (o.groupMeta && o.groupMeta.ContentSummary) { %}
+            <div class="group-content-summary text-muted small mt-1">{%=o.groupMeta.ContentSummary%}</div>
             {% } %}
         </td>
 
