@@ -121,6 +121,18 @@ class GridFieldGroupable
     protected array $groupMetadataFields = [];
 
     /**
+     * Per-field render config for metadata fields.
+     * Keyed by field name, values are arrays with options:
+     * - 'badge' (bool) — render as badge
+     * - 'badgeClass' (string) — badge CSS class (default: 'badge-secondary')
+     * - 'icon' (string) — icon class to prepend (e.g. 'bi-bookmark-fill')
+     * - 'copyable' (bool) — add copy-to-clipboard button
+     * - 'element' (string) — wrapper element tag (default: 'span')
+     * - 'class' (string) — CSS classes on wrapper
+     */
+    protected array $groupMetadataConfig = [];
+
+    /**
      * Whether the item field stores a FK ID (DataObject mode) or string key (legacy mode).
      * Automatically set to true when setGroupsFromRelation() is called.
      */
@@ -302,12 +314,30 @@ class GridFieldGroupable
      * Set additional fields from group DataObject to serialize for JS template.
      * These become available as {%=o.groupMeta.FieldName%} in templates.
      *
-     * @param array $fields List of field names
+     * Accepts flat array or associative array with per-field render config:
+     *   ['Code', 'ContentSummary']                              // flat (backward compatible)
+     *   ['Code' => ['badge' => true, 'icon' => 'bi-bookmark-fill'], 'ContentSummary' => [...]]
+     *
+     * @param array $fields List of field names, or field => config pairs (mixed is allowed)
      * @return $this
      */
     public function setGroupMetadataFields(array $fields): self
     {
-        $this->groupMetadataFields = $fields;
+        $this->groupMetadataFields = [];
+        $this->groupMetadataConfig = [];
+
+        foreach ($fields as $key => $value) {
+            if (is_int($key)) {
+                # Flat entry: 'Code'
+                $this->groupMetadataFields[] = $value;
+                $this->groupMetadataConfig[$value] = [];
+            } else {
+                # Associative: 'Code' => ['badge' => true, ...]
+                $this->groupMetadataFields[] = $key;
+                $this->groupMetadataConfig[$key] = $value;
+            }
+        }
+
         return $this;
     }
 
@@ -712,6 +742,11 @@ class GridFieldGroupable
 
         $grid->setAttribute('data-groupable-groups', json_encode($groups));
         $grid->setAttribute('data-groupable-mode', $mode);
+
+        # Serialize per-field metadata render config for JS template
+        if (!empty($this->groupMetadataConfig)) {
+            $grid->setAttribute('data-groupable-meta-config', json_encode($this->groupMetadataConfig));
+        }
 
         // insert divider js tmpl
         $groupsField = (is_string($this->getOption('groupsFieldOnSource')) ? $this->getOption('groupsFieldOnSource') : '');

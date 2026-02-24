@@ -94,14 +94,26 @@
                     // Build template data based on mode
                     // Note: jQuery .data() auto-converts "true"/"false" strings to booleans
                     var editableTitle = self.getGridField().data('groupable-editable-title') == true;
+                    var metaConfig = self.getGridField().data('groupable-meta-config') || {};
                     var data;
                     if (mode === 'dataobject' && typeof groupData === 'object') {
+                        // Build metaFields array for generic template iteration
+                        var metaFields = [];
+                        $.each(groupData, function(key, val) {
+                            // Skip structural keys, only include metadata fields with values
+                            if (['id', 'name'].indexOf(key) === -1 && val) {
+                                var cfg = metaConfig[key] || {};
+                                metaFields.push($.extend({field: key, value: val}, cfg));
+                            }
+                        });
+
                         // DataObject mode: groupData is an object with name, id, and metadata
                         data = {
                             "groupName": groupData.name || self.getNoGroupName(),
                             "groupKey": groupKey,
                             "groupId": groupData.id || null,
                             "groupMeta": groupData,  // Pass full object for template access
+                            "metaFields": metaFields, // Structured array for template loop
                             "editableTitle": editableTitle
                         };
                     } else {
@@ -111,6 +123,7 @@
                             "groupKey": groupKey,
                             "groupId": null,
                             "groupMeta": {},
+                            "metaFields": [],
                             "editableTitle": false  // Never editable in legacy mode
                         };
                     }
@@ -872,6 +885,27 @@
                         self._hideInput();
                     }
                 });
+            }
+        });
+
+        /**
+         * Copy-to-clipboard button for metadata fields
+         */
+        $(".ss-gridfield .groupable-copy-btn").entwine({
+            onclick: function(e) {
+                e.preventDefault();
+                var self = this;
+                var text = this.data('copy-value');
+
+                navigator.clipboard.writeText(text);
+
+                // Visual feedback: swap icon briefly
+                self.removeClass('bi-copy').addClass('bi-check text-success');
+                setTimeout(function() {
+                    self.removeClass('bi-check text-success').addClass('bi-copy');
+                }, 1500);
+
+                return false;
             }
         });
 

@@ -38,15 +38,20 @@
             <strong class="group-title" data-group-id="{%=o.groupId%}">{%=o.groupName%}</strong>
             {% } %}
 
-            <%-- Render metadata badges if available --%>
-            {% if (o.groupMeta && o.groupMeta.Code) { %}
-            <span class="badge badge-secondary ml-2">{%=o.groupMeta.Code%}</span>
-            {% } %}
-
-            <%-- Render ContentSummary if available --%>
-            {% if (o.groupMeta && o.groupMeta.ContentSummary) { %}
-            <div class="group-content-summary text-muted small mt-1">{%=o.groupMeta.ContentSummary%}</div>
-            {% } %}
+            <%-- Render metadata fields based on config --%>
+            {% if (o.metaFields) { for (var i=0; i < o.metaFields.length; i++) { var mf = o.metaFields[i]; %}
+                {% if (mf.value) { %}
+                    {% if (mf.badge) { %}
+                    <span class="badge {%=mf.badgeClass || 'badge-secondary'%} ml-2">
+                        {% if (mf.icon) { %}<i class="{%=mf.icon%} mr-1"></i>{% } %}
+                        {%=mf.value%}
+                        {% if (mf.copyable) { %}<i class="bi bi-copy ml-1 groupable-copy-btn" style="cursor:pointer;opacity:.6" title="Copy" data-copy-value="{%=mf.value%}"></i>{% } %}
+                    </span>
+                    {% } else { %}
+                    <{%=mf.element || 'div'%} class="group-meta-{%=mf.field%} {%=mf['class'] || ''%}">{%=mf.value%}</{%=mf.element || 'div'%}>
+                    {% } %}
+                {% } %}
+            {% } } %}
         </td>
 
     </tr>
