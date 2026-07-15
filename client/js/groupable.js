@@ -342,17 +342,20 @@
                                 'X-Requested-With': 'XMLHttpRequest'
                             },
                             success: function(response) {
-                                // Check if response indicates an error (HTML error page)
-                                if (response.indexOf('ERROR') !== -1 || response.indexOf('error') !== -1) {
-                                    console.error('Server returned error in response');
-                                    // Mark as changed since save failed but DOM state is different
-                                    var cmsForm = $('.cms-edit-form');
-                                    cmsForm.addClass('changed');
-                                } else {
-                                    // Success - data was saved, no need to mark form dirty
-                                    if (typeof ss !== 'undefined' && ss.StatusMessage) {
-                                        ss.StatusMessage('Item moved and saved');
-                                    }
+                                // HTTP 2xx = saved: server-side failures surface as non-2xx (httpError/fatals)
+                                // and land in the error callback below. Do NOT sniff the HTML body for 'error'
+                                // substrings — that false-positived on legitimate grid content (titles, CSS
+                                // classnames etc. containing 'error') and wrongly marked the form dirty.
+                                // if (response.indexOf('ERROR') !== -1 || response.indexOf('error') !== -1) {
+                                //     console.error('Server returned error in response');
+                                //     // Mark as changed since save failed but DOM state is different
+                                //     var cmsForm = $('.cms-edit-form');
+                                //     cmsForm.addClass('changed');
+                                // } else {
+
+                                // Success - data was saved, no need to mark form dirty
+                                if (typeof ss !== 'undefined' && ss.StatusMessage) {
+                                    ss.StatusMessage('Item moved and saved');
                                 }
                             },
                             error: function(xhr, status, error) {

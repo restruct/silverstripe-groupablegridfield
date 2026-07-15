@@ -81,6 +81,13 @@ class GridFieldGroupable
     /**
      * If true, group assignments are saved immediately via AJAX.
      * If false, they are saved when the form is submitted.
+     *
+     * NB: FALLBACK ONLY — when a GridFieldOrderableRows component is present (it effectively is
+     * required, see getHTMLFragments), immediate-mode is DERIVED from that component via
+     * getImmediateUpdate($grid). The JS keys off OrderableRows' `data-immediate-update` attribute,
+     * so a diverging own flag made drag-assignments silently revert on form save (JS deferred the
+     * per-row hidden inputs to form-save while handleSave skipped its persistence branch).
+     * Configure immediate-mode on GridFieldOrderableRows::setImmediateUpdate() instead.
      */
     public bool $immediateUpdate = true;
 
@@ -173,7 +180,7 @@ class GridFieldGroupable
      *   ],
      * ]
      *
-     * Handler signature: (GridField $gridField, DataObject $group, DataObject $sourceRecord)
+     * Handler signature: (GridField $gridField, DataObject $sourceRecord, DataObject $group, array $actionData)
      * Should return: ['success' => bool, 'message' => string, 'redirect' => string|null]
      */
     protected array $groupActions = [];
@@ -479,14 +486,21 @@ class GridFieldGroupable
      *
      * Inspired by GridFieldSaveToFuseButton closure pattern.
      *
+     * NB parameter order is ($name, $title, $icon) and the handler receives
+     * ($gridField, $sourceRecord, $group, $actionData) — as documented in the README since the
+     * DataObject-mode release. Pre-2.4 the implementation deviated from its own docs (it took
+     * ($name, $icon, $title) and invoked handler($grid, $group, $record)), so README-following
+     * consumers got swapped icon/title and an ArgumentCountError on click.
+     *
      * @param string $name Action identifier (used in URL and JS)
-     * @param string $icon Font icon class (e.g., 'font-icon-sync')
      * @param string $title Button title/tooltip
-     * @param Closure $handler Handler receives: (GridField, DataObject $group, DataObject $source)
+     * @param string $icon Font icon class (e.g., 'font-icon-sync')
+     * @param Closure $handler Handler receives: (GridField $grid, DataObject $sourceRecord, DataObject $group, array $actionData)
      *                         Returns: ['success' => bool, 'message' => string, 'redirect' => string|null]
      * @return $this
      */
-    public function addGroupAction(string $name, string $icon, string $title, Closure $handler): self
+    // public function addGroupAction(string $name, string $icon, string $title, Closure $handler): self  // old: icon/title order contradicted the README + only known consumer
+    public function addGroupAction(string $name, string $title, string $icon, Closure $handler): self
     {
         $this->groupActions[$name] = [
             'icon' => $icon,
@@ -640,6 +654,25 @@ class GridFieldGroupable
     }
 
     /**
+     * Resolve whether group assignments are saved immediately via AJAX.
+     *
+     * Derived from the GridFieldOrderableRows component when present: the groupable JS keys off
+     * OrderableRows' `data-immediate-update` attribute, so the PHP save paths MUST follow the same
+     * source of truth. When the flags diverged (OrderableRows::setImmediateUpdate(false) with this
+     * component's own $immediateUpdate still true), the JS correctly deferred drag-assignments to
+     * form-save via per-row hidden inputs, but handleSave() skipped its persistence branch — the
+     * item LOOKED moved and silently reverted after save.
+     * The public $immediateUpdate property is only consulted when no OrderableRows is configured.
+     */
+    public function getImmediateUpdate(GridField $grid): bool
+    {
+        $orderable = $grid->getConfig()->getComponentByType(GridFieldOrderableRows::class);
+
+        # NB symbiote's property is protected — always go through its getter (direct access fatals)
+        return $orderable ? (bool) $orderable->getImmediateUpdate() : $this->immediateUpdate;
+    }
+
+    /**
      * Convenience function to have the requirements included
      */
     public static function include_requirements()
@@ -754,14 +787,34 @@ class GridFieldGroupable
             'ColSpan' => $grid->getColumnCount() - 1,
             'GroupFieldLabel' => $this->groupFieldLabel,
             'GroupsFieldNameOnSource' => $groupsField,
+            # Grid name namespaces the divider inputs ({GridName}[{groupsField}][key][]) so submitted
+            # groups data arrives inside the grid's own value (see handleSave) instead of as a
+            # top-level request var that had to be plucked from Controller::curr()
+            'GridName' => $grid->getName(),
             'IsDataObjectMode' => $this->isDataObjectMode(),
             'HasGroupActions' => $this->hasGroupActions(),
         ]);
 
         // Select template: use DataObject template if in DataObject mode and no custom template set
         $template = $this->dividerTemplate;
-        if ($this->isDataObjectMode() && $template === 'GFGroupableDivider') {
-            $template = 'GFDataObjectGroupableDivider';
+        // if ($this->isDataObjectMode() && $template === 'GFGroupableDivider') {
+        //     $template = 'GFDataObjectGroupableDivider';
+        // }
+        if ($template === 'GFGroupableDivider') {  # only auto-resolve when no custom template was set
+            if ($this->isDataObjectMode()) {
+                $template = 'GFDataObjectGroupableDivider';
+            } elseif (($addGroupButton = $grid->getConfig()->getComponentByType(GridFieldAddNewGroupButton::class))
+                && $addGroupButton->canRender($grid)
+            ) {
+                # Legacy mode: activate the enhanced divider (editable name inputs + per-section remove
+                # button) whenever the add-group button is present AND will render for this user.
+                # Resolved HERE at render time so component order no longer matters — the button used to
+                # mutate dividerTemplate from its own getHTMLFragments, which silently left the grid
+                # display-only when added after GridFieldGroupable (fragments render in component order).
+                # canRender() keeps divider editability in sync with the button's permission check, so
+                # readonly users keep the plain display-only divider.
+                $template = 'GFEnhancedGroupableDivider';
+            }
         }
 
         return [
@@ -828,7 +881,13 @@ class GridFieldGroupable
         } else {
             // boundary was dragged
             $groupsFieldOnSource = $this->groupsFieldOnSource;
-            $groupData = $request->requestVar($groupsFieldOnSource);
+            // $groupData = $request->requestVar($groupsFieldOnSource);  // old: top-level request var — divider inputs are now namespaced under the grid name
+            $gridValue = $request->requestVar($grid->getName());
+            $groupData = (is_array($gridValue) && $groupsFieldOnSource) ? ($gridValue[$groupsFieldOnSource] ?? null) : null;
+            if (!$groupData && $groupsFieldOnSource) {
+                # BC fallback: custom divider templates may still submit pre-2.4 top-level {groupsField}[key][] inputs
+                $groupData = $request->requestVar($groupsFieldOnSource);
+            }
 
             if ($groupsFieldOnSource && $groupData && ($form = $grid->getForm()) && ($record = $form->getRecord())) {
                 // update groups on record
@@ -849,7 +908,8 @@ class GridFieldGroupable
         // JS now sends data in the same format as grid.reload(), so we can always use handleReorder
         $orderableRowsComponent = $grid->getConfig()->getComponentByType(GridFieldOrderableRows::class);
 
-        if ($orderableRowsComponent && $orderableRowsComponent->immediateUpdate) {
+        // if ($orderableRowsComponent && $orderableRowsComponent->immediateUpdate) {  // old: $immediateUpdate is PROTECTED on GridFieldOrderableRows — this fataled in immediate/AJAX mode
+        if ($orderableRowsComponent && $orderableRowsComponent->getImmediateUpdate()) {
             return $orderableRowsComponent->handleReorder($grid, $request);
         }
 
@@ -1194,7 +1254,9 @@ class GridFieldGroupable
             // Execute the action handler
             $action = $this->groupActions[$actionName];
             $handler = $action['handler'];
-            $result = $handler($grid, $group, $record);
+            // $result = $handler($grid, $group, $record);  // old: contradicted the documented handler signature — README-following consumers received the group as $sourceRecord (and vice versa) and 4-param closures fataled
+            # Handler signature per README: ($gridField, $sourceRecord, $group, $actionData)
+            $result = $handler($grid, $record, $group, $request->postVars());
 
             // Normalize result
             if (!is_array($result)) {
@@ -1327,6 +1389,10 @@ class GridFieldGroupable
 
                 case 'unassign':
                 default:
+                    # Capture the count BEFORE unassigning — $itemsInGroup is a lazy DataList, so
+                    # re-evaluating it after the loop (for the message below) would yield 0
+                    $unassignedCount = $itemsInGroup->count();
+
                     // Unassign items from the group
                     foreach ($itemsInGroup as $item) {
                         if ($list instanceof ManyManyList && array_key_exists($groupField, $list->getExtraFields())) {
@@ -1347,7 +1413,8 @@ class GridFieldGroupable
                         'success' => true,
                         'message' => sprintf(
                             'Group deleted. %d item(s) unassigned.',
-                            $itemsInGroup->count()
+                            // $itemsInGroup->count()  // old: lazy list re-evaluates after unassigning → always reported 0
+                            $unassignedCount
                         ),
                     ];
                     break;
@@ -1488,7 +1555,8 @@ class GridFieldGroupable
 //        }
         $groupsFieldOnSource = $this->groupsFieldOnSource;
         // probably not the correct way to get the submitted data, but it works for now...
-        $groupData = Controller::curr()->getRequest()->requestVar($groupsFieldOnSource);
+        // $groupData = Controller::curr()->getRequest()->requestVar($groupsFieldOnSource);  // old: raw request read — divider inputs are now namespaced under the grid name and arrive in the grid's own submitted value
+        $groupData = $this->getSubmittedGroupsData($grid);
 
         if ($groupsFieldOnSource && $groupData && ($form = $grid->getForm()) && ($record = $form->getRecord())) {
             // update groups on record
@@ -1496,7 +1564,8 @@ class GridFieldGroupable
         }
 
         // and update each record's section if not already done via Ajax
-        if (!$this->immediateUpdate) {
+        // if (!$this->immediateUpdate) {  // old: own never-synced flag (default true) — with OrderableRows::setImmediateUpdate(false) the JS deferred to form-save but this branch got skipped, silently reverting drag-assignments
+        if (!$this->getImmediateUpdate($grid)) {
             $groupField = $this->getOption('groupField');
             $list = $grid->getList();
             $values = $grid->Value();
@@ -1552,6 +1621,34 @@ class GridFieldGroupable
 
     }
 
+    /**
+     * Read the submitted groups (key/val arrays from the enhanced divider inputs) for legacy mode.
+     *
+     * Primary source is the grid's own submitted value — the divider inputs are namespaced as
+     * {GridName}[{groupsField}][key][] so Form::loadDataFrom delivers them via $grid->Value(),
+     * same as the per-row [GridFieldGroupable] hidden inputs. Falls back to the raw request var
+     * for custom divider templates still using the pre-2.4 top-level {groupsField}[key][] naming.
+     *
+     * @return array|null ['key' => [...], 'val' => [...]] or null when nothing was submitted
+     */
+    protected function getSubmittedGroupsData(GridField $grid)
+    {
+        $groupsFieldOnSource = $this->groupsFieldOnSource;
+        if (!$groupsFieldOnSource) {
+            return null;
+        }
+
+        $value = $grid->Value();
+        $groupData = is_array($value) ? ($value[$groupsFieldOnSource] ?? null) : null;
+
+        if (!$groupData && Controller::has_curr()) {
+            # BC fallback: pre-2.4 divider templates submitted top-level {groupsField}[key][] inputs
+            $groupData = Controller::curr()->getRequest()->requestVar($groupsFieldOnSource);
+        }
+
+        return $groupData;
+    }
+
     private function updateGroupsOnRecord($record, $groupsFieldOnSource, $groupData)
     {
         // use KeyValueField to serialize, filters out empty values as well
@@ -1567,6 +1664,13 @@ class GridFieldGroupable
 
         // and save groups into record
         $keyValueField->saveInto($record); // record is an object, so can be updated from this scope
+
+        # ALSO refresh the record-level composite cache with the final map: if the record held a raw
+        # array for this field (e.g. from an earlier `$record->Sections = [...]` assignment in the same
+        # request), that stale array would WIN over the just-updated {field}Value column when the record
+        # is written — DataObject::write() serializes $record[$field] when present, silently reverting
+        # the saveInto() above. Setting the fresh map keeps cache, change-tracking and column in sync.
+        $record->setField($groupsFieldOnSource, $keyValueField->Value());
     }
 
     /**

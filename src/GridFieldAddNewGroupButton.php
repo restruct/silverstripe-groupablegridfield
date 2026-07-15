@@ -63,10 +63,32 @@ class GridFieldAddNewGroupButton
         return $this->$option;
     }
 
+    /**
+     * Whether the button will actually render for the current user/grid.
+     *
+     * Also consulted by GridFieldGroupable's render-time divider template resolution, so the
+     * enhanced (editable) divider only activates when this button renders too — keeps section
+     * editability and the add-button in sync for readonly users.
+     */
+    public function canRender($grid): bool
+    {
+        # Check privileges: canWrite on record OR canCreate on gridfieldmodel
+        # (null-safe: grids can render without a form/record, e.g. in previews — treat as renderable)
+        if ($grid->getList()
+            && ($form = $grid->getForm()) && ($record = $form->getRecord())
+            && !$record->canEdit() && !singleton($grid->getModelClass())->canCreate()
+        ) {
+            return false;
+        }
+
+        return true;
+    }
+
     public function getHTMLFragments($grid)
     {
         // Check privileges: canWrite on record OR canCreate on gridfieldmodel
-        if ($grid->getList() && !$grid->getForm()->getRecord()->canEdit() && !singleton($grid->getModelClass())->canCreate()) {
+        // if ($grid->getList() && !$grid->getForm()->getRecord()->canEdit() && !singleton($grid->getModelClass())->canCreate()) {  // old: inline check, not null-safe on getForm()/getRecord()
+        if (!$this->canRender($grid)) {
             return [];
         }
 
@@ -80,7 +102,7 @@ class GridFieldAddNewGroupButton
         } else {
             $groupLabel = $groupable->getOption('groupFieldLabel');
             $this->groupsRelationField = $groupable->getOption('groupsFieldOnSource');
-            $groupable->setOption('dividerTemplate', 'GFEnhancedGroupableDivider');
+            // $groupable->setOption('dividerTemplate', 'GFEnhancedGroupableDivider');  // old: order-dependent (only worked when this button rendered BEFORE GridFieldGroupable) and clobbered custom templates — GridFieldGroupable now resolves the enhanced divider itself at render time via canRender()
 //            die($groupable->getOption('dividerTemplate'));
         }
         if (!$this->groupsRelationField) {

@@ -8,8 +8,11 @@
         <td colspan="$ColSpan">
             <span class="boundary-indicator">&darr;</span>
             {$GroupFieldLabel}:
-            <input type="hidden" value="{%=o.groupKey%}" placeholder="$GroupFieldLabel Key" name="$GroupsFieldNameOnSource[key][]" class="group-key" {% if (o.groupKey=='') { %}disabled{% } %} ></input>
-            <input type="text" value="{%=o.groupName%}" placeholder="$GroupFieldLabel Name" name="$GroupsFieldNameOnSource[val][]" class="group-val editable-column-field text" {% if (o.groupKey=='') { %}disabled{% } %} ></input>
+            <%-- inputs are namespaced under the grid name so they arrive in the grid's submitted value --%>
+            <%-- (read by GridFieldGroupable::handleSave via $grid->Value()) instead of as top-level request vars --%>
+            <%-- NB the unassigned divider (groupKey=='') stays disabled so it never submits --%>
+            <input type="hidden" value="{%=o.groupKey%}" placeholder="$GroupFieldLabel Key" name="{$GridName}[{$GroupsFieldNameOnSource}][key][]" class="group-key" {% if (o.groupKey=='') { %}disabled{% } %} ></input>
+            <input type="text" value="{%=o.groupName%}" placeholder="$GroupFieldLabel Name" name="{$GridName}[{$GroupsFieldNameOnSource}][val][]" class="group-val editable-column-field text" {% if (o.groupKey=='') { %}disabled{% } %} ></input>
             {% if (o.unsavedGroupNotice) { %}<span class="alert alert-warning icon font-icon-info-circled">&nbsp;{%=o.unsavedGroupNotice%}</span>{% } %}
             <button type="button" title="Remove “{%=o.groupName%}”" class="btn btn--no-text btn--icon-md font-icon-cross-mark grid-field__icon-action float-right ss-gridfield-delete-groups-divider"></button>
         </td>
