@@ -407,6 +407,10 @@ class GridFieldGroupableTest extends SapphireTest
         # Item #4: inputs namespaced under the grid name so they land in $grid->Value()
         $this->assertStringContainsString('name="Items[Sections][key][]"', $fragment);
         $this->assertStringContainsString('name="Items[Sections][val][]"', $fragment);
+        # Group identity must be a data-ATTRIBUTE on the divider row (2.4.1): the .data() store is
+        # lost on the .clone() used for whole-group drags — without the attribute, a doc dragged
+        # into a just-reordered section read an undefined groupKey and was saved unassigned
+        $this->assertStringContainsString('data-group-key="{%=o.groupKey%}"', $fragment);
     }
 
     public function testDataObjectModeUsesDataObjectDivider(): void
@@ -418,6 +422,9 @@ class GridFieldGroupableTest extends SapphireTest
 
         $this->assertStringContainsString('group-title', $fragment);
         $this->assertSame('dataobject', $grid->getAttribute('data-groupable-mode'));
+        # Clone-surviving group identity attributes on the divider row (2.4.1, see enhanced-divider test)
+        $this->assertStringContainsString('data-group-key="{%=o.groupKey%}"', $fragment);
+        $this->assertStringContainsString('data-group-id="{%=o.groupId%}"', $fragment);
     }
 
     // ========================================

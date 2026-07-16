@@ -1,5 +1,7 @@
 <script type="text/x-tmpl" class="ss-gridfield-inline-new ss-gridfield-groupable-divider-template" id="groupable_divider_template">
-    <tr class="groupable-bound groupable-dataobject-bound {% if (o.groupId) { %}groupable-advanced-bound{% } %}" data-group-id="{%=o.groupId%}">
+    <%-- group identity as data-ATTRIBUTES: survive the .clone() used for whole-group dragging --%>
+    <%-- (jQuery .data() reads fall back to these when the store is absent on cloned rows) --%>
+    <tr class="groupable-bound groupable-dataobject-bound {% if (o.groupId) { %}groupable-advanced-bound{% } %}" data-group-id="{%=o.groupId%}" data-group-key="{%=o.groupKey%}" data-group-name="{%=o.groupName%}">
 
         <td class="col-reorder">
             {% if (o.groupId) { %}

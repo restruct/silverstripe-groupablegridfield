@@ -1,5 +1,8 @@
 <script type="text/x-tmpl" class="ss-gridfield-inline-new ss-gridfield-groupable-divider-template" id="groupable_divider_template">
-	<tr class="groupable-bound groupable-advanced-bound">
+    <%-- group identity as data-ATTRIBUTES on the row: jQuery .data() reads fall back to these, and --%>
+    <%-- unlike the .data() store they SURVIVE the .clone() used for whole-group dragging — without --%>
+    <%-- them a doc dragged into a just-reordered section read an undefined groupKey (assigned 'none') --%>
+	<tr class="groupable-bound groupable-advanced-bound" data-group-key="{%=o.groupKey%}" data-group-name="{%=o.groupName%}">
 
         <td class="col-reorder">
             <div class="handle ui-sortable-handle"><i class="icon font-icon-drag-handle"></i></div>

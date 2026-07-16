@@ -411,7 +411,24 @@
                         // Clone the selected items into an array (row + all items until next group boundary)
                         // Use .groupable-bound to stop at ANY boundary including "unassigned" group
                         var drag_target = row;
-                        var group_items = row.nextUntil('.groupable-bound').addBack().clone();
+                        var originals = row.nextUntil('.groupable-bound').addBack();
+                        var group_items = originals.clone();
+
+                        // .clone() only carries markup/attribute state — the jQuery .data() store and LIVE
+                        // form values (properties) are lost. Group identity (groupKey/name/id) is covered by
+                        // data-* attributes on the divider row (see divider templates; .data() reads fall
+                        // back to attributes), but unsaved form state on the cloned rows — an in-flight
+                        // section rename, drag-set hidden group inputs, multidrag checkboxes — must be
+                        // copied over explicitly (index-aligned), else it silently reverts after group-drag.
+                        var origInputs = originals.find('input, select, textarea');
+                        group_items.find('input, select, textarea').each(function(idx) {
+                            var orig = origInputs.eq(idx);
+                            if (orig.is(':checkbox, :radio')) {
+                                this.checked = orig.prop('checked');
+                            } else {
+                                $(this).val(orig.val());
+                            }
+                        });
 
                         // Store clones for restore, and reference to original
                         row.data('multidrag', group_items).data('original', drag_target);
