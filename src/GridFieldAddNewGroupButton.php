@@ -4,7 +4,8 @@ namespace Restruct\Silverstripe\GroupableGridfield;
 
 use Exception;
 use SilverStripe\Forms\GridField\GridField_HTMLProvider;
-use SilverStripe\View\ArrayData;
+# ArrayData moved namespace in Silverstripe 6; built via GridFieldGroupable::create_array_data()
+//use SilverStripe\View\ArrayData;
 use Symbiote\MultiValueField\Fields\KeyValueField;
 
 /**
@@ -116,7 +117,8 @@ class GridFieldAddNewGroupButton
             $groupsFromGrid = $record->dbObject($this->groupsRelationField)->getValues();
         }
 
-        $data = new ArrayData([
+        // $data = new ArrayData([  // old: SS5-only class name
+        $data = GridFieldGroupable::create_array_data([
             'Title' => ($this->title == _t('GridFieldExtensions.ADD', 'Add') ? $this->title . " $groupLabel" : $this->title),
             'GroupsRelationField' => $this->groupsRelationField,
             'AvailableGroups' => json_encode($groupsFromGrid),

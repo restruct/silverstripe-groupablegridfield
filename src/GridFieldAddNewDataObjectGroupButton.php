@@ -5,7 +5,8 @@ namespace Restruct\Silverstripe\GroupableGridfield;
 use Exception;
 use SilverStripe\Forms\GridField\GridField;
 use SilverStripe\Forms\GridField\GridField_HTMLProvider;
-use SilverStripe\View\ArrayData;
+# ArrayData moved namespace in Silverstripe 6; built via GridFieldGroupable::create_array_data()
+//use SilverStripe\View\ArrayData;
 
 /**
  * Button component for creating new DataObject groups in GridFieldGroupable.
@@ -195,7 +196,8 @@ class GridFieldAddNewDataObjectGroupButton implements GridField_HTMLProvider
         // Get label from groupable config
         $groupLabel = $groupable->getOption('groupFieldLabel') ?? 'Group';
 
-        $data = new ArrayData([
+        // $data = new ArrayData([  // old: SS5-only class name
+        $data = GridFieldGroupable::create_array_data([
             'Title' => $this->title,
             'GroupLabel' => $groupLabel,
             'Placeholder' => $this->placeholder,

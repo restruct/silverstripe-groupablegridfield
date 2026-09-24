@@ -20,7 +20,9 @@ use SilverStripe\ORM\DataObjectInterface;
 use SilverStripe\ORM\ManyManyList;
 use SilverStripe\ORM\ManyManyThroughList;
 use SilverStripe\ORM\SS_List;
-use SilverStripe\View\ArrayData;
+# ArrayData is NOT imported: it moved namespace in Silverstripe 6 (View\ArrayData -> Model\ArrayData)
+# with no alias left behind, so it is resolved per major in create_array_data() below
+//use SilverStripe\View\ArrayData;
 use SilverStripe\View\Requirements;
 use Symbiote\GridFieldExtensions\GridFieldOrderableRows;
 use Symbiote\MultiValueField\Fields\KeyValueField;
@@ -673,6 +675,26 @@ class GridFieldGroupable
     }
 
     /**
+     * Build an ArrayData for the running Silverstripe major.
+     *
+     * The class moved from SilverStripe\View\ArrayData (SS5) to SilverStripe\Model\ArrayData (SS6)
+     * with no alias, so neither name can be imported on a line that supports both: an import names
+     * exactly one of them, and the other major then fails with "class not found" on first render.
+     *
+     * @internal shared by this module's components; not part of the public API
+     * @param array $data
+     * @return \SilverStripe\Model\ArrayData|\SilverStripe\View\ArrayData
+     */
+    public static function create_array_data(array $data)
+    {
+        $class = class_exists('SilverStripe\\Model\\ArrayData')
+            ? 'SilverStripe\\Model\\ArrayData'
+            : 'SilverStripe\\View\\ArrayData';
+
+        return $class::create($data);
+    }
+
+    /**
      * Convenience function to have the requirements included
      */
     public static function include_requirements()
@@ -783,7 +805,8 @@ class GridFieldGroupable
 
         // insert divider js tmpl
         $groupsField = (is_string($this->getOption('groupsFieldOnSource')) ? $this->getOption('groupsFieldOnSource') : '');
-        $data = new ArrayData([
+        // $data = new ArrayData([  // old: SS5-only class name, see create_array_data()
+        $data = self::create_array_data([
             'ColSpan' => $grid->getColumnCount() - 1,
             'GroupFieldLabel' => $this->groupFieldLabel,
             'GroupsFieldNameOnSource' => $groupsField,
@@ -1568,7 +1591,10 @@ class GridFieldGroupable
         if (!$this->getImmediateUpdate($grid)) {
             $groupField = $this->getOption('groupField');
             $list = $grid->getList();
-            $values = $grid->Value();
+            // $values = $grid->Value();  // old: FormField::Value() is deprecated in 5.4 and REMOVED in SS6
+            # dataValue() returns the raw submitted value on SS5 and SS6 alike (FormField::$value, as
+            # Value() did on SS5 and getValue() does on SS6), so one call serves both majors
+            $values = $grid->dataValue();
 //            "GridFieldGroupable"]=>
 //              array(10) {
 //                        [5]=>
@@ -1625,7 +1651,7 @@ class GridFieldGroupable
      * Read the submitted groups (key/val arrays from the enhanced divider inputs) for legacy mode.
      *
      * Primary source is the grid's own submitted value — the divider inputs are namespaced as
-     * {GridName}[{groupsField}][key][] so Form::loadDataFrom delivers them via $grid->Value(),
+     * {GridName}[{groupsField}][key][] so Form::loadDataFrom delivers them via $grid->dataValue(),
      * same as the per-row [GridFieldGroupable] hidden inputs. Falls back to the raw request var
      * for custom divider templates still using the pre-2.4 top-level {groupsField}[key][] naming.
      *
@@ -1638,12 +1664,17 @@ class GridFieldGroupable
             return null;
         }
 
-        $value = $grid->Value();
+        // $value = $grid->Value();  // old: removed in SS6, see handleSave()
+        $value = $grid->dataValue();
         $groupData = is_array($value) ? ($value[$groupsFieldOnSource] ?? null) : null;
 
-        if (!$groupData && Controller::has_curr()) {
+        // if (!$groupData && Controller::has_curr()) {  // old: has_curr() is removed in SS6 (fatal)
+        # Valid on SS6 (no has_curr(); curr() returns null silently) and silent on an empty SS5 stack,
+        # where a bare curr() raises E_USER_WARNING - see SSKB profiles/core-principles.md (has_curr block)
+        $controller = (method_exists(Controller::class, 'has_curr') && !Controller::has_curr()) ? null : Controller::curr();
+        if (!$groupData && $controller) {
             # BC fallback: pre-2.4 divider templates submitted top-level {groupsField}[key][] inputs
-            $groupData = Controller::curr()->getRequest()->requestVar($groupsFieldOnSource);
+            $groupData = $controller->getRequest()->requestVar($groupsFieldOnSource);
         }
 
         return $groupData;
@@ -1658,7 +1689,8 @@ class GridFieldGroupable
         // unset 'none' (not sent anymore because 'none' key gets 'disabled' and is thus not submitted anymore
         // key has become '' (empty string) anyway
         // left here because why not...
-        $keyvals = $keyValueField->Value(); // now a key-value list, with empty vals already filtered out
+        // $keyvals = $keyValueField->Value(); // old: FormField::Value() is removed in SS6
+        $keyvals = $keyValueField->dataValue(); // now a key-value list, with empty vals already filtered out
         if (array_key_exists('none', $keyvals)) unset($keyvals['none']);
         $keyValueField->setValue($keyvals);
 
@@ -1670,7 +1702,8 @@ class GridFieldGroupable
         # request), that stale array would WIN over the just-updated {field}Value column when the record
         # is written — DataObject::write() serializes $record[$field] when present, silently reverting
         # the saveInto() above. Setting the fresh map keeps cache, change-tracking and column in sync.
-        $record->setField($groupsFieldOnSource, $keyValueField->Value());
+        // $record->setField($groupsFieldOnSource, $keyValueField->Value());  // old: removed in SS6
+        $record->setField($groupsFieldOnSource, $keyValueField->dataValue());
     }
 
     /**

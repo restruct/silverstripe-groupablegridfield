@@ -12,7 +12,7 @@
             <span class="boundary-indicator">&darr;</span>
             {$GroupFieldLabel}:
             <%-- inputs are namespaced under the grid name so they arrive in the grid's submitted value --%>
-            <%-- (read by GridFieldGroupable::handleSave via $grid->Value()) instead of as top-level request vars --%>
+            <%-- (read by GridFieldGroupable::handleSave via $grid->dataValue()) instead of as top-level request vars --%>
             <%-- NB the unassigned divider (groupKey=='') stays disabled so it never submits --%>
             <input type="hidden" value="{%=o.groupKey%}" placeholder="$GroupFieldLabel Key" name="{$GridName}[{$GroupsFieldNameOnSource}][key][]" class="group-key" {% if (o.groupKey=='') { %}disabled{% } %} ></input>
             <input type="text" value="{%=o.groupName%}" placeholder="$GroupFieldLabel Name" name="{$GridName}[{$GroupsFieldNameOnSource}][val][]" class="group-val editable-column-field text" {% if (o.groupKey=='') { %}disabled{% } %} ></input>

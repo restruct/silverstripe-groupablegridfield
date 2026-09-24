@@ -2,6 +2,7 @@
 
 namespace Restruct\Silverstripe\GroupableGridfield;
 
+use SilverStripe\Forms\FormField;
 use Symbiote\MultiValueField\Fields\KeyValueField;
 use Symbiote\MultiValueField\ORM\FieldType\MultiValueField;
 
@@ -18,7 +19,11 @@ class GroupableDataField
     extends MultiValueField
 {
 
-    public function scaffoldFormField($title = null, $params = null)
+    // public function scaffoldFormField($title = null, $params = null)  // old: no return type — fatals on SS6, where multivaluefield 7 declares `(?string $title = null, array $params = []): FormField`
+    # Signature valid against BOTH parents: parameters stay untyped (a child may widen, so this
+    # satisfies SS6's typed `?string`/`array`, and SS5's untyped parent forbids adding types), and the
+    # FormField return type is allowed on SS5 too (a child may add a return type the parent lacks).
+    public function scaffoldFormField($title = null, $params = []): FormField
     {
         return KeyValueField::create($this->name, $title)
             ->addExtraClass('groupable-data groupable-data-hidden')
