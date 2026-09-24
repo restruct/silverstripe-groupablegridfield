@@ -1391,7 +1391,8 @@ class GridFieldGroupable
                         ]);
                     }
                     // No items, safe to delete
-                    $group->delete();
+                    // $group->delete();  // old: left the many_many join row behind (only the group row went)
+                    $this->deleteGroupRecord($groupList, $group);
                     $result = [
                         'success' => true,
                         'message' => 'Group deleted successfully',
@@ -1424,6 +1425,13 @@ class GridFieldGroupable
                     # re-evaluating it after the loop (for the message below) would yield 0
                     $unassignedCount = $itemsInGroup->count();
 
+                    # Delete the group FIRST (#11), while it is still linked to its owner and its items
+                    # still point at it: the group's onBeforeDelete() can then resolve its parent, and a
+                    # veto thrown there (e.g. ValidationException) aborts before anything was changed.
+                    # The items are found again below by their (still set) group key, so they are
+                    # unassigned all the same.
+                    $this->deleteGroupRecord($groupList, $group);
+
                     // Unassign items from the group
                     foreach ($itemsInGroup as $item) {
                         if ($list instanceof ManyManyList && array_key_exists($groupField, $list->getExtraFields())) {
@@ -1437,8 +1445,8 @@ class GridFieldGroupable
                     }
 
                     // Remove group from relation and delete
-                    $groupList->remove($group);
-                    $group->delete();
+                    // $groupList->remove($group);  // old (#11): unlinked the group BEFORE delete(), so its onBeforeDelete() could not resolve the parent, and a veto thrown there left an unlinked but still existing record
+                    // $group->delete();  // now done by deleteGroupRecord() above, before the items are unassigned
 
                     $result = [
                         'success' => true,
@@ -1464,6 +1472,34 @@ class GridFieldGroupable
                 'success' => false,
                 'message' => 'Error deleting group: ' . $e->getMessage(),
             ]);
+        }
+    }
+
+    /**
+     * Delete a group record and drop its link to the source record, in that order (#11).
+     *
+     * delete() runs while the group is still linked, so its onBeforeDelete() can resolve its owner
+     * through the relation, and an exception thrown there leaves the group linked and intact.
+     * Only then is a many_many join row removed. That uses removeByID(), which deletes the join
+     * row in SQL (ManyManyList) or deletes the join record (ManyManyThroughList) and never writes
+     * the group itself.
+     *
+     * A has_many relation has nothing left to unlink: the link IS the FK column on the deleted row.
+     * HasManyList::remove() must NOT be called after delete(): it sets the FK to null and write()s
+     * the record, whose ID delete() has reset to 0, so the write would INSERT the group again as an
+     * orphan.
+     *
+     * @param Relation $groupList the source record's groups relation
+     * @param DataObject $group a member of $groupList
+     */
+    protected function deleteGroupRecord(Relation $groupList, DataObject $group): void
+    {
+        $groupID = $group->ID;
+
+        $group->delete();
+
+        if ($groupList instanceof ManyManyList || $groupList instanceof ManyManyThroughList) {
+            $groupList->removeByID($groupID);
         }
     }
 
