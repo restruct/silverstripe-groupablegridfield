@@ -231,7 +231,20 @@ class CrossMajorCompatTest extends SapphireTest
         [$grid, $groupable] = $this->buildLegacyGrid($Source, $controller, true);
         $grid->setValue(null);
 
-        $groupable->handleSave($grid, $Source);
+        # SapphireTest itself keeps a dummy controller on the stack for the whole run (SS5
+        # SapphireTest::start() pushes one), so "not pushing ours" is not enough: empty the stack
+        # for the duration of the call and restore it afterwards. Reflection, because the stack is
+        # a protected static and emptying it through popCurrent() would need curr(), the very
+        # call under test.
+        $stack = new \ReflectionProperty(\SilverStripe\Control\Controller::class, 'controller_stack');
+        $stack->setAccessible(true);
+        $saved = $stack->getValue();
+        $stack->setValue(null, []);
+        try {
+            $groupable->handleSave($grid, $Source);
+        } finally {
+            $stack->setValue(null, $saved);
+        }
 
         $this->assertSame(
             ['sec_a' => 'Alpha', 'sec_b' => 'Beta'],
