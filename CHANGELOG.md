@@ -16,8 +16,9 @@ of 2.0.0. See [UPGRADING.md](UPGRADING.md).
   group is deleted while it is still linked to its owner, then a many_many (or many_many through)
   link is removed, all in one database transaction. Before, the group was unlinked from its owner
   before `delete()` ran (#11).
-- **`getGroupSortTable()` takes a `SilverStripe\ORM\Relation`** (was `SilverStripe\ORM\SS_List`,
-  which no longer exists on Silverstripe 6). Every relation list implements it.
+- **`getGroupSortTable()`'s parameter is untyped** (was `SilverStripe\ORM\SS_List`, which has a
+  different class name on Silverstripe 6). Calls are unaffected; a subclass that overrides it must
+  drop the `SS_List` type from its signature.
 - **From 3.0.0 only:** `GroupableDataField::getValues()` no longer turns an empty value into `[]`;
   it returns what `MultiValueField::getValues()` returns (`null` when empty), as on 2.x.
 

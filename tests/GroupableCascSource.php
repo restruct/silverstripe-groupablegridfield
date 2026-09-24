@@ -32,6 +32,15 @@ class GroupableCascSource extends DataObject implements TestOnly
         ],
     ];
 
+    /**
+     * A groups "relation" that is a plain filtered DataList, not a relation list: the shape a
+     * consumer gets from Section::get()->filter(...). It must work as a groups source like on 2.x.
+     */
+    public function FilteredSections()
+    {
+        return GroupableCascSection::get()->filter('SourceID', $this->ID);
+    }
+
     public function canView($member = null)
     {
         return true;

@@ -16,6 +16,7 @@ class GroupableCascSection extends DataObject implements TestOnly
 
     private static $db = [
         'Name' => 'Varchar',
+        'Sort' => 'Int',
     ];
 
     private static $has_one = [

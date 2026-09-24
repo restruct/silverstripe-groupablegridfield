@@ -13,8 +13,9 @@ The code is 2.4.1 plus the changes below.
    now sees it still linked. The usual reason to care is the opposite one: code that needs the owner
    in `onBeforeDelete()`, or that vetoes a delete by throwing (the whole deletion, unassignment
    included, is then rolled back), now works as expected. 'callback' mode is unchanged.
-3. **`getGroupSortTable()`** is typed `SilverStripe\ORM\Relation` instead of `SS_List`. Only
-   relevant if you call it with a list that is not a relation, or override it in a subclass.
+3. **`getGroupSortTable()`** takes an untyped list parameter instead of `SS_List` (whose class
+   name differs between Silverstripe 5 and 6). Only relevant if you override it in a subclass:
+   drop the type from your signature. A groups method returning a plain `DataList` keeps working.
 4. **Flush after upgrading**, as for any module update.
 
 ## To 4.x from 3.0.0

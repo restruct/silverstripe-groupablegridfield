@@ -24,6 +24,9 @@ use SilverStripe\ORM\ManyManyThroughList;
 # SS_List moved to SilverStripe\Model\List in SS6 with no alias, so a parameter typed with the
 # SS5 name throws a TypeError on SS6 as soon as it is called. Relation (same FQCN on both majors)
 # is what every groups relation list implements, so group-list parameters are typed with it.
+# Correction: they are left UNTYPED instead. A groups method may return a plain filtered DataList
+# (2.x accepted any SS_List), which is not a Relation; a Relation type made that a TypeError, an
+# Error that the handlers' catch (Exception) does not catch. Relation is kept for the docblocks.
 //use SilverStripe\ORM\SS_List;
 use SilverStripe\ORM\Relation;
 # ArrayData is NOT imported: it moved namespace in Silverstripe 6 (View\ArrayData -> Model\ArrayData)
@@ -410,12 +413,15 @@ class GridFieldGroupable
      * Gets the table which contains the group sort field.
      * Adapted from GridFieldOrderableRows::getSortTable().
      *
-     * @param Relation $groupList The list of groups
+     * @param Relation|\SilverStripe\ORM\DataList $groupList The list of groups: a relation list, or
+     *        any DataList of group records (SS_List on 2.x); untyped because SS_List has a
+     *        different FQCN on SS5 and SS6
      * @return string The table name
      * @throws Exception If sort field cannot be found
      */
     // public function getGroupSortTable(SS_List $groupList): string  // old: SS5-only type, TypeError on SS6 (broke handleGroupReorder there)
-    public function getGroupSortTable(Relation $groupList): string
+    // public function getGroupSortTable(Relation $groupList): string  // old (4.0 draft): narrower than 2.x, a plain DataList groups source threw a TypeError
+    public function getGroupSortTable($groupList): string
     {
         $field = $this->groupSortField;
 
@@ -1498,10 +1504,12 @@ class GridFieldGroupable
      * the record, whose ID delete() has reset to 0, so the write would INSERT the group again as an
      * orphan.
      *
-     * @param Relation $groupList the source record's groups relation
+     * @param Relation|\SilverStripe\ORM\DataList $groupList the source record's groups relation
+     *        (or a plain DataList of groups, which has no link to drop); untyped, see getGroupSortTable()
      * @param DataObject $group a member of $groupList
      */
-    protected function deleteGroupRecord(Relation $groupList, DataObject $group): void
+    // protected function deleteGroupRecord(Relation $groupList, DataObject $group): void  // old (4.0 draft): TypeError for a plain DataList groups source
+    protected function deleteGroupRecord($groupList, DataObject $group): void
     {
         $groupID = $group->ID;
 
