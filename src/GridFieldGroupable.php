@@ -17,6 +17,7 @@ use SilverStripe\Forms\HiddenField;
 use SilverStripe\ORM\DataList;
 use SilverStripe\ORM\DataObject;
 use SilverStripe\ORM\DataObjectInterface;
+use SilverStripe\ORM\DataObjectSchema;
 use SilverStripe\ORM\ManyManyList;
 use SilverStripe\ORM\ManyManyThroughList;
 use SilverStripe\ORM\SS_List;
@@ -432,7 +433,9 @@ class GridFieldGroupable
         // Field is on the DataObject itself
         $classes = ClassInfo::dataClassesFor($groupList->dataClass());
         foreach ($classes as $class) {
-            if (DataObject::singleton($class)->hasOwnTableDatabaseField($field)) {
+            // if (DataObject::singleton($class)->hasOwnTableDatabaseField($field)) {  // old: the method does not exist (SS4 or SS5), so every reorder with the sort field on the group DataObject errored
+            # Same test the old method made: is $field a DB column on THIS class's own table
+            if (DataObject::getSchema()->fieldSpec($class, $field, DataObjectSchema::DB_ONLY | DataObjectSchema::UNINHERITED)) {
                 return DataObject::getSchema()->tableName($class);
             }
         }
@@ -1696,7 +1699,8 @@ class GridFieldGroupable
         $classes = ClassInfo::dataClassesFor($list->dataClass());
 
         foreach ($classes as $class) {
-            if (singleton($class)->hasOwnTableDatabaseField($field)) {
+            // if (singleton($class)->hasOwnTableDatabaseField($field)) {  // old: the method does not exist (SS4 or SS5)
+            if (DataObject::getSchema()->fieldSpec($class, $field, DataObjectSchema::DB_ONLY | DataObjectSchema::UNINHERITED)) {
                 return $class;
             }
         }
