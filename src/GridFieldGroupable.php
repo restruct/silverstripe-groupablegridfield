@@ -18,6 +18,7 @@ use SilverStripe\ORM\DataList;
 use SilverStripe\ORM\DataObject;
 use SilverStripe\ORM\DataObjectInterface;
 use SilverStripe\ORM\DataObjectSchema;
+use SilverStripe\ORM\DB;
 use SilverStripe\ORM\ManyManyList;
 use SilverStripe\ORM\ManyManyThroughList;
 # SS_List moved to SilverStripe\Model\List in SS6 with no alias, so a parameter typed with the
@@ -1430,23 +1431,31 @@ class GridFieldGroupable
                     # veto thrown there (e.g. ValidationException) aborts before anything was changed.
                     # The items are found again below by their (still set) group key, so they are
                     # unassigned all the same.
-                    $this->deleteGroupRecord($groupList, $group);
-
-                    // Unassign items from the group
-                    foreach ($itemsInGroup as $item) {
-                        if ($list instanceof ManyManyList && array_key_exists($groupField, $list->getExtraFields())) {
-                            // Update many_many extra field
-                            $list->add($item, [$groupField => null]);
-                        } else {
-                            // Update field on item
-                            $item->$groupField = null;
-                            $item->write();
+                    // $this->deleteGroupRecord($groupList, $group);  // old (4.0 draft): deleting while the items still pointed at the group ran the group's cascade_deletes over them, so they were DELETED while the message said "unassigned"
+                    # Unassign the items first, THEN delete the group while it is still linked to its
+                    # owner (what #11 needs: onBeforeDelete() can resolve its parent), then drop a
+                    # many_many link. All of it in one transaction, so a veto thrown in the group's
+                    # onBeforeDelete() rolls the unassignment back and leaves everything as it was.
+                    # withTransaction() rethrows after the rollback; the catch below reports it.
+                    DB::get_conn()->withTransaction(function () use ($itemsInGroup, $list, $groupField, $groupList, $group) {
+                        // Unassign items from the group
+                        foreach ($itemsInGroup as $item) {
+                            if ($list instanceof ManyManyList && array_key_exists($groupField, $list->getExtraFields())) {
+                                // Update many_many extra field
+                                $list->add($item, [$groupField => null]);
+                            } else {
+                                // Update field on item
+                                $item->$groupField = null;
+                                $item->write();
+                            }
                         }
-                    }
+
+                        $this->deleteGroupRecord($groupList, $group);
+                    });
 
                     // Remove group from relation and delete
                     // $groupList->remove($group);  // old (#11): unlinked the group BEFORE delete(), so its onBeforeDelete() could not resolve the parent, and a veto thrown there left an unlinked but still existing record
-                    // $group->delete();  // now done by deleteGroupRecord() above, before the items are unassigned
+                    // $group->delete();  // now done by deleteGroupRecord() above, after the items are unassigned, before the link is dropped
 
                     $result = [
                         'success' => true,

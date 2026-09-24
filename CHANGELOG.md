@@ -12,9 +12,10 @@ of 2.0.0. See [UPGRADING.md](UPGRADING.md).
   `symbiote/silverstripe-gridfieldextensions` `^4 || ^5`, `symbiote/silverstripe-multivaluefield`
   `^6 || ^7`. Silverstripe 4 projects keep resolving the 2.x tags. `silverstripe/vendor-plugin`
   `^2 || ^3` is now declared (the `client/` expose depends on it; framework already pulled it in).
-- **Group deletion order ('unassign' mode, DataObject mode).** The group is now deleted first, then
-  its items are unassigned, then a many_many join row is removed. Before, the group was unlinked
-  from its owner and its items unassigned before `delete()` ran (#11).
+- **Group deletion order ('unassign' mode, DataObject mode).** The items are unassigned, then the
+  group is deleted while it is still linked to its owner, then a many_many (or many_many through)
+  link is removed, all in one database transaction. Before, the group was unlinked from its owner
+  before `delete()` ran (#11).
 - **`getGroupSortTable()` takes a `SilverStripe\ORM\Relation`** (was `SilverStripe\ORM\SS_List`,
   which no longer exists on Silverstripe 6). Every relation list implements it.
 - **From 3.0.0 only:** `GroupableDataField::getValues()` no longer turns an empty value into `[]`;
@@ -31,8 +32,9 @@ of 2.0.0. See [UPGRADING.md](UPGRADING.md).
   `handleGroupReorder()` answered "Error reordering groups". On Silverstripe 6 the `SS_List` type
   made it throw before that. Many_many groups with the sort field in extraFields were not affected.
 - A group's `onBeforeDelete()` could not resolve its owner, and a veto thrown there left an unlinked
-  but still existing group with its items already unassigned (#11). It now sees its owner and items,
-  and a veto leaves everything as it was.
+  but still existing group with its items already unassigned (#11). It now sees its owner, and a
+  veto rolls the whole deletion back, item unassignment included. A group class with
+  `cascade_deletes` on its items keeps those items: they are unassigned before the group is deleted.
 - 'prevent' mode left the many_many join row of a deleted group behind.
 - README: the DataObject-mode example chained the component setters onto the `GridFieldConfig`
   (which fails), and documented a `setGroupDeleteHandler()` method that does not exist; the handler
