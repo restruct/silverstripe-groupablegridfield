@@ -17,9 +17,14 @@ use SilverStripe\Forms\HiddenField;
 use SilverStripe\ORM\DataList;
 use SilverStripe\ORM\DataObject;
 use SilverStripe\ORM\DataObjectInterface;
+use SilverStripe\ORM\DataObjectSchema;
 use SilverStripe\ORM\ManyManyList;
 use SilverStripe\ORM\ManyManyThroughList;
-use SilverStripe\ORM\SS_List;
+# SS_List moved to SilverStripe\Model\List in SS6 with no alias, so a parameter typed with the
+# SS5 name throws a TypeError on SS6 as soon as it is called. Relation (same FQCN on both majors)
+# is what every groups relation list implements, so group-list parameters are typed with it.
+//use SilverStripe\ORM\SS_List;
+use SilverStripe\ORM\Relation;
 # ArrayData is NOT imported: it moved namespace in Silverstripe 6 (View\ArrayData -> Model\ArrayData)
 # with no alias left behind, so it is resolved per major in create_array_data() below
 //use SilverStripe\View\ArrayData;
@@ -404,11 +409,12 @@ class GridFieldGroupable
      * Gets the table which contains the group sort field.
      * Adapted from GridFieldOrderableRows::getSortTable().
      *
-     * @param SS_List $groupList The list of groups
+     * @param Relation $groupList The list of groups
      * @return string The table name
      * @throws Exception If sort field cannot be found
      */
-    public function getGroupSortTable(SS_List $groupList): string
+    // public function getGroupSortTable(SS_List $groupList): string  // old: SS5-only type, TypeError on SS6 (broke handleGroupReorder there)
+    public function getGroupSortTable(Relation $groupList): string
     {
         $field = $this->groupSortField;
 
@@ -434,7 +440,9 @@ class GridFieldGroupable
         // Field is on the DataObject itself
         $classes = ClassInfo::dataClassesFor($groupList->dataClass());
         foreach ($classes as $class) {
-            if (DataObject::singleton($class)->hasOwnTableDatabaseField($field)) {
+            // if (DataObject::singleton($class)->hasOwnTableDatabaseField($field)) {  // old: method no longer exists (SS5 or SS6) — every reorder with a sort field on the group DataObject errored
+            # Same test the old method made: is $field a DB column on THIS class's own table
+            if (DataObject::getSchema()->fieldSpec($class, $field, DataObjectSchema::DB_ONLY | DataObjectSchema::UNINHERITED)) {
                 return DataObject::getSchema()->tableName($class);
             }
         }
@@ -1729,7 +1737,8 @@ class GridFieldGroupable
         $classes = ClassInfo::dataClassesFor($list->dataClass());
 
         foreach ($classes as $class) {
-            if (singleton($class)->hasOwnTableDatabaseField($field)) {
+            // if (singleton($class)->hasOwnTableDatabaseField($field)) {  // old: method no longer exists (SS5 or SS6)
+            if (DataObject::getSchema()->fieldSpec($class, $field, DataObjectSchema::DB_ONLY | DataObjectSchema::UNINHERITED)) {
                 return $class;
             }
         }
