@@ -1732,10 +1732,15 @@ class GridFieldGroupable
         // if (!$groupData && Controller::has_curr()) {  // old: has_curr() is removed in SS6 (fatal)
         # Valid on SS6 (no has_curr(); curr() returns null silently) and silent on an empty SS5 stack,
         # where a bare curr() raises E_USER_WARNING - see SSKB profiles/core-principles.md (has_curr block)
-        $controller = (method_exists(Controller::class, 'has_curr') && !Controller::has_curr()) ? null : Controller::curr();
-        if (!$groupData && $controller) {
-            # BC fallback: pre-2.4 divider templates submitted top-level {groupsField}[key][] inputs
-            $groupData = $controller->getRequest()->requestVar($groupsFieldOnSource);
+        // $controller = (method_exists(Controller::class, 'has_curr') && !Controller::has_curr()) ? null : Controller::curr();  // old (4.0 draft): ran on every save, so SS5 raised has_curr()'s 5.4.0 deprecation notice even when the grid value carried the groups
+        // if (!$groupData && $controller) {
+        # Only look for a controller when the fallback is needed (v2 short-circuited on !$groupData too)
+        if (!$groupData) {
+            $controller = (method_exists(Controller::class, 'has_curr') && !Controller::has_curr()) ? null : Controller::curr();
+            if ($controller) {
+                # BC fallback: pre-2.4 divider templates submitted top-level {groupsField}[key][] inputs
+                $groupData = $controller->getRequest()->requestVar($groupsFieldOnSource);
+            }
         }
 
         return $groupData;

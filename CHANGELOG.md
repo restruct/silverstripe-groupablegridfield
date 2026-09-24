@@ -37,6 +37,9 @@ of 2.0.0. See [UPGRADING.md](UPGRADING.md).
   veto rolls the whole deletion back, item unassignment included. A group class with
   `cascade_deletes` on its items keeps those items: they are unassigned before the group is deleted.
 - 'prevent' mode left the many_many join row of a deleted group behind.
+- Silverstripe 5: a legacy-mode save no longer raises `Controller::has_curr()`'s deprecation notice
+  when the groups arrive in the grid value; the controller is only looked up for the pre-2.4
+  top-level request-var fallback.
 - README: the DataObject-mode example chained the component setters onto the `GridFieldConfig`
   (which fails), and documented a `setGroupDeleteHandler()` method that does not exist; the handler
   is the second argument of `setGroupDeleteBehavior('callback', $handler)`.
