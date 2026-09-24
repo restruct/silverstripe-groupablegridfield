@@ -1,3 +1,5 @@
+<%-- Bootstrap 4 (SS5 CMS) and Bootstrap 5 (SS6 CMS) utility classes are paired (float-right float-end, ml-2 ms-2, --%>
+<%-- badge-secondary bg-secondary, data-toggle data-bs-toggle): each CMS styles its own and ignores the other --%>
 <script type="text/x-tmpl" class="ss-gridfield-inline-new ss-gridfield-groupable-divider-template" id="groupable_divider_template">
     <%-- group identity as data-ATTRIBUTES: survive the .clone() used for whole-group dragging --%>
     <%-- (jQuery .data() reads fall back to these when the store is absent on cloned rows) --%>
@@ -12,7 +14,7 @@
         <td colspan="$ColSpan">
             <%-- Action buttons area (floated right, must come first in DOM) --%>
             {% if (o.groupId) { %}
-            <div class="group-actions float-right">
+            <div class="group-actions float-right float-end">
                 <%-- Delete button --%>
                 <button type="button"
                         title="Delete {%=o.groupName%}"
@@ -44,10 +46,10 @@
             {% if (o.metaFields) { for (var i=0; i < o.metaFields.length; i++) { var mf = o.metaFields[i]; %}
                 {% if (mf.value) { %}
                     {% if (mf.badge) { %}
-                    <span class="badge {%=mf.badgeClass || 'badge-secondary'%} ml-2">
-                        {% if (mf.icon) { %}<i class="{%=mf.icon%} mr-1"></i>{% } %}
+                    <span class="badge {%=mf.badgeClass || 'badge-secondary bg-secondary'%} ml-2 ms-2">
+                        {% if (mf.icon) { %}<i class="{%=mf.icon%} mr-1 me-1"></i>{% } %}
                         {%=mf.value%}
-                        {% if (mf.copyable) { %}<i class="bi bi-copy ml-1 groupable-copy-btn" style="cursor:pointer;opacity:.6" title="Copy" data-copy-value="{%=mf.value%}"></i>{% } %}
+                        {% if (mf.copyable) { %}<i class="bi bi-copy ml-1 ms-1 groupable-copy-btn" style="cursor:pointer;opacity:.6" title="Copy" data-copy-value="{%=mf.value%}"></i>{% } %}
                     </span>
                     {% } else { %}
                     <{%=mf.element || 'div'%} class="group-meta-{%=mf.field%} {%=mf['class'] || ''%}">{%=mf.value%}</{%=mf.element || 'div'%}>
