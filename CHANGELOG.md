@@ -22,6 +22,12 @@ of 2.0.0. See [UPGRADING.md](UPGRADING.md).
 - **From 3.0.0 only:** `GroupableDataField::getValues()` no longer turns an empty value into `[]`;
   it returns what `MultiValueField::getValues()` returns (`null` when empty), as on 2.x.
 
+### Security
+
+- Legacy (MultiValueField) mode: dragging a group boundary wrote the source record after checking
+  only the item class's permissions. It now also requires `canEdit()` on the source record, and
+  answers 403 otherwise, like every other handler.
+
 ### Fixed
 
 - Silverstripe 6: `GroupableDataField` fataled at class load (its `scaffoldFormField()` signature

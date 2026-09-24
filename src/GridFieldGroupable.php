@@ -928,6 +928,12 @@ class GridFieldGroupable
             }
 
             if ($groupsFieldOnSource && $groupData && ($form = $grid->getForm()) && ($record = $form->getRecord())) {
+                # This branch writes the SOURCE record, so check canEdit() on it, as every other
+                # handler does: the check at the top only covers the item class
+                if (!$record->canEdit()) {
+                    $this->httpError(403, 'Permission denied');
+                }
+
                 // update groups on record
                 $this->updateGroupsOnRecord($record, $groupsFieldOnSource, $groupData);
 
