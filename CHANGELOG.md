@@ -1,6 +1,6 @@
 # Changelog
 
-## 4.0.0 (2026-09-24)
+## 4.0.0 (2026-09-25)
 
 Silverstripe 5 and 6 from one codebase. This line is the `v2` code (2.4.1) made to run on
 Silverstripe 6, not a continuation of the `3.0.0` tag, which was an unfinished Silverstripe 6 port

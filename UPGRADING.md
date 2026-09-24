@@ -16,7 +16,10 @@ The code is 2.4.1 plus the changes below.
 3. **`getGroupSortTable()`** takes an untyped list parameter instead of `SS_List` (whose class
    name differs between Silverstripe 5 and 6). Only relevant if you override it in a subclass:
    drop the type from your signature. A groups method returning a plain `DataList` keeps working.
-4. **Flush after upgrading**, as for any module update.
+4. **Legacy-mode boundary drags need `canEdit()` on the source record.** Dragging a group divider
+   writes the source record; it now answers 403 when the member cannot edit that record (before,
+   only the item class was checked).
+5. **Flush after upgrading**, as for any module update.
 
 ## To 4.x from 3.0.0
 

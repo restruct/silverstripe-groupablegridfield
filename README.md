@@ -8,10 +8,10 @@ A powerful GridField component that enables drag-and-drop grouping of items. Ite
 **Key features:**
 - Drag items between groups
 - Drag entire groups (with their items) to reorder
-- Two modes: **MultiValue** (groups as key→name pairs in a MultiValueField on the source record) and **DataObject** (database-backed groups)
+- Two modes: **MultiValue** (groups as key->name pairs in a MultiValueField on the source record) and **DataObject** (database-backed groups)
 - DataObject mode supports: group creation, deletion, reordering, metadata display, custom actions, and inline title editing
 - Soft refresh preserves unsaved GridFieldEditableColumns changes
-- Works on top of GridFieldOrderableRows (**required** — the component raises a warning without it, and immediate-vs-deferred saving is derived from it, see below)
+- Works on top of GridFieldOrderableRows (**required** - the component raises a warning without it, and immediate-vs-deferred saving is derived from it, see below)
 
 <img width="784" height="559" alt="groupable" src="https://github.com/user-attachments/assets/caeca7e8-cc46-4c5d-9b54-93d92f4ba6a6" />
 
@@ -44,11 +44,11 @@ composer require restruct/silverstripe-groupable-gridfield
 
 ### MultiValue Mode (MultiValueField Groups)
 
-*(previously referred to as "legacy mode" — it is not deprecated, just the original lightweight mode; the grid attribute is `data-groupable-mode="multivalue"`)*
+*(previously referred to as "legacy mode" - it is not deprecated, just the original lightweight mode; the grid attribute is `data-groupable-mode="multivalue"`)*
 
-Groups are stored as key→name pairs in a MultiValueField on the source record (requires `symbiote/silverstripe-multivaluefield`). Good for simple use cases where groups don't need their own database records.
+Groups are stored as key->name pairs in a MultiValueField on the source record (requires `symbiote/silverstripe-multivaluefield`). Good for simple use cases where groups don't need their own database records.
 
-The **group field on items** may be a plain DB field on the item, **or a `many_many_extraFields` column** on the relation between source and items — both are supported transparently (assignments are written via `ManyManyList::add()` when the group field is an extra field).
+The **group field on items** may be a plain DB field on the item, **or a `many_many_extraFields` column** on the relation between source and items - both are supported transparently (assignments are written via `ManyManyList::add()` when the group field is an extra field).
 
 ```php
 use Restruct\Silverstripe\GroupableGridfield\GridFieldGroupable;
@@ -70,7 +70,7 @@ $config = GridFieldConfig::create()
 **Add/edit/remove groups in the grid** requires the `GridFieldAddNewGroupButton` component: when it is present
 (and renders for the current user), `GridFieldGroupable` automatically switches the divider rows to the
 *enhanced* template with editable group-name inputs and a per-group remove button, persisted on form save.
-Without the button the grid renders plain display-only dividers — remove the button for readonly users to
+Without the button the grid renders plain display-only dividers - remove the button for readonly users to
 get exactly that. Component order does not matter (since 2.4; before that the button had to be added
 **before** `GridFieldGroupable`).
 
@@ -110,7 +110,7 @@ $config = GridFieldConfig::create()
 |--------|-------------|
 | `setSoftRefresh(bool)` | Preserve unsaved EditableColumns edits (default: true) |
 
-**Immediate vs deferred saving** is configured on `GridFieldOrderableRows::setImmediateUpdate(bool)` — NOT
+**Immediate vs deferred saving** is configured on `GridFieldOrderableRows::setImmediateUpdate(bool)` - NOT
 on this component. `GridFieldGroupable` derives its save behaviour from the OrderableRows component (both
 the JS and the PHP save paths), so the two can never get out of sync:
 - *immediate* (OrderableRows default): drag-assignments and reorders persist via AJAX right away
@@ -118,7 +118,7 @@ the JS and the PHP save paths), so the two can never get out of sync:
   the form is saved (via `GridFieldGroupable::handleSave`)
 
 The public `GridFieldGroupable::$immediateUpdate` property is only consulted when no OrderableRows
-component is configured (which is unsupported anyway) — do not use it.
+component is configured (which is unsupported anyway) - do not use it.
 
 ### DataObject Mode Options
 
@@ -163,10 +163,11 @@ $groupable->setGroupDeleteBehavior('callback', function ($gridField, $group, $it
 });
 ```
 
-- **`unassign`**: the group record is deleted, then its items are unassigned (group field set to
-  `null`), then a many_many join row is removed. The delete comes first, so the group's
-  `onBeforeDelete()` still sees its owner and its items, and an exception thrown there aborts the
-  whole operation with nothing changed (since 4.0).
+- **`unassign`**: the items are unassigned (group field set to `null`), then the group record is
+  deleted while it is still linked to its owner, then a many_many (or many_many through) link is
+  removed, all in one database transaction. The group's `onBeforeDelete()` still sees its owner,
+  an exception thrown there rolls the whole operation back with nothing changed, and a group class
+  with `cascade_deletes` on its items keeps them (since 4.0).
 - **`prevent`**: refuses while any item is assigned to the group; otherwise deletes it the same way.
 - **`callback`**: your handler does everything, in whatever order it needs.
 
@@ -193,7 +194,7 @@ $groupable->addGroupAction(
 
 **NB:** before 2.4 the *implementation* deviated from this documented signature (it took
 `($name, $icon, $title)` and invoked the handler as `($grid, $group, $record)`). Since 2.4 the code
-matches the documentation above — if you had written a consumer against the old *code* order,
+matches the documentation above - if you had written a consumer against the old *code* order,
 swap your `$title`/`$icon` arguments and handler parameters.
 
 ### Inline Title Editing
@@ -261,10 +262,10 @@ PHP sends groups as an array (not object) to preserve sort order. JavaScript obj
 
 The "unassigned" pseudo-group maps per mode when an item is dropped into it:
 - **MultiValue mode:** group field is set to `''` (empty string; may roundtrip as `null` from
-  many_many extra fields — both mean unassigned)
+  many_many extra fields - both mean unassigned)
 - **DataObject mode:** FK field is set to `null` (stored as `0`)
 
-The unassigned divider's name input is `disabled` so it never submits — do not "fix" that: submitting it
+The unassigned divider's name input is `disabled` so it never submits - do not "fix" that: submitting it
 would create a phantom group entry in the MultiValueField.
 
 ### Click-to-Edit Implementation
@@ -281,10 +282,10 @@ Bootstrap utility classes (`.d-none`, `.d-inline-block`) handle visibility toggl
 ## Requirements
 
 - Silverstripe ^5 || ^6 (4.x, `main`); Silverstripe 4 projects use the 2.x tags
-- symbiote/silverstripe-gridfieldextensions — `GridFieldOrderableRows` is a **hard requirement**:
+- symbiote/silverstripe-gridfieldextensions - `GridFieldOrderableRows` is a **hard requirement**:
   `GridFieldGroupable` raises a `user_error` when it is missing, and derives immediate-vs-deferred
   saving from it
-- symbiote/silverstripe-multivaluefield — used by MultiValue mode (groups storage) and the
+- symbiote/silverstripe-multivaluefield - used by MultiValue mode (groups storage) and the
   `GridFieldAddNewGroupButton`
 - PHP ^8.1 (Silverstripe 6 itself needs 8.3+)
 
