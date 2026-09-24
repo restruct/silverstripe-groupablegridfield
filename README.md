@@ -1,5 +1,8 @@
 # SilverStripe GridField Groupable
 
+*Maintained by [Restruct](https://github.com/restruct). If this module saves you time, you can
+[support ongoing maintenance](https://github.com/sponsors/restruct).*
+
 A powerful GridField component that enables drag-and-drop grouping of items. Items can be organized into visual groups with reorderable group boundaries, metadata display, and optional inline editing.
 
 **Key features:**
@@ -14,14 +17,22 @@ A powerful GridField component that enables drag-and-drop grouping of items. Ite
 
 ## Version Compatibility
 
-| Branch   | Module Version | Silverstripe    | PHP            |
-|----------|----------------|-----------------|----------------|
-| `master` | `3.x`          | ^5.0 \|\| ^6.0  | ^8.1           |
-| `v2`     | `2.x`          | ^4.0 \|\| ^5.0  | ^8.1           |
-| `v1`     | `1.x`          | ^4.0            | ^7.4 \|\| ^8.0 |
-| -        | `0.x`          | ^3.0            | ^5.6 \|\| ^7.0 |
+| Branch        | Module Version | Silverstripe    | PHP            |
+|---------------|----------------|-----------------|----------------|
+| `main`        | `4.x`          | ^5 \|\| ^6      | ^8.1 (SS6: 8.3+) |
+| `v2`          | `2.x`          | ^4 \|\| ^5      | ^8.1           |
+| (tag only)    | `3.0.0`        | ^6              | 8.3+           |
+| (tags only)   | `1.x`          | ^4              | ^7.4 \|\| ^8.0 |
+| (tags only)   | `0.x`          | ^3              | ^5.6 \|\| ^7.0 |
 
-**Note:** `composer.json` is the source of truth for exact version constraints.
+`main` is the maintained line: one codebase for Silverstripe 5 and 6. `v2` gets security and bug
+fixes for Silverstripe 4 projects only; Silverstripe 4 reached end of life in April 2025 and is not
+supported or tested on `main`. `3.0.0` was an unfinished Silverstripe 6 port of 2.0.0 and lacks
+everything from 2.1 onwards (DataObject mode among it); `4.x` supersedes it. Upgrading from 2.x or
+3.0.0: see [UPGRADING.md](UPGRADING.md) and [CHANGELOG.md](CHANGELOG.md).
+
+**`composer.json` is the source of truth** for exact version constraints; this table is a quick
+reference.
 
 ## Installation
 
@@ -72,19 +83,22 @@ use Restruct\Silverstripe\GroupableGridfield\GridFieldGroupable;
 use Restruct\Silverstripe\GroupableGridfield\GridFieldAddNewDataObjectGroupButton;
 use Symbiote\GridFieldExtensions\GridFieldOrderableRows;
 
-$config = GridFieldConfig::create()
-    ->addComponent(new GridFieldOrderableRows('SortOrder'))
-    ->addComponent(new GridFieldGroupable(
+$groupable = GridFieldGroupable::create(
         'SectionID',                    // FK field on items (e.g., has_one relation)
         'Section',                      // Label for group field
         'No Section'                    // Name for "unassigned" group
-    ))
+    )
     ->setGroupsFromRelation('Sections') // Relation method returning groups
     ->setGroupTitleField('Name')        // Field on group DO for display name
     ->setGroupMetadataFields(['Code', 'Description'])  // Extra fields for display
     ->setGroupSortField('Sort')         // Enable group reordering
     ->setEditableGroupTitle(true)       // Enable click-to-edit titles
-    ->setGroupDeleteBehavior('unassign') // What happens when group is deleted
+    ->setGroupDeleteBehavior('unassign'); // What happens when group is deleted
+
+// The setters above return the component, not the config: add it once it is configured
+$config = GridFieldConfig::create()
+    ->addComponent(new GridFieldOrderableRows('SortOrder'))
+    ->addComponent($groupable)
     ->addComponent(new GridFieldAddNewDataObjectGroupButton());
 ```
 
@@ -139,15 +153,22 @@ $groupable->setGroupCreateHandler(function ($gridField, $sourceRecord, $groupDat
 ### Group Deletion
 
 ```php
-// Options: 'unassign', 'prevent', 'callback'
+// Options: 'unassign' (default), 'prevent', 'callback'
 $groupable->setGroupDeleteBehavior('unassign');
 
-// Custom handler (when mode is 'callback')
-$groupable->setGroupDeleteHandler(function ($gridField, $group, $itemsInGroup) {
+// Custom handler (when mode is 'callback'), passed as the second argument
+$groupable->setGroupDeleteBehavior('callback', function ($gridField, $group, $itemsInGroup) {
     // Custom logic
     return ['success' => true, 'message' => 'Deleted'];
 });
 ```
+
+- **`unassign`**: the group record is deleted, then its items are unassigned (group field set to
+  `null`), then a many_many join row is removed. The delete comes first, so the group's
+  `onBeforeDelete()` still sees its owner and its items, and an exception thrown there aborts the
+  whole operation with nothing changed (since 4.0).
+- **`prevent`**: refuses while any item is assigned to the group; otherwise deletes it the same way.
+- **`callback`**: your handler does everything, in whatever order it needs.
 
 ### Custom Group Actions
 
@@ -259,13 +280,30 @@ Bootstrap utility classes (`.d-none`, `.d-inline-block`) handle visibility toggl
 
 ## Requirements
 
-- SilverStripe ^4.0 || ^5.0 (2.x branch; 3.x targets ^5.0 || ^6.0)
+- Silverstripe ^5 || ^6 (4.x, `main`); Silverstripe 4 projects use the 2.x tags
 - symbiote/silverstripe-gridfieldextensions — `GridFieldOrderableRows` is a **hard requirement**:
   `GridFieldGroupable` raises a `user_error` when it is missing, and derives immediate-vs-deferred
   saving from it
 - symbiote/silverstripe-multivaluefield — used by MultiValue mode (groups storage) and the
   `GridFieldAddNewGroupButton`
-- PHP ^8.1
+- PHP ^8.1 (Silverstripe 6 itself needs 8.3+)
+
+## Running the tests
+
+The suite needs a booted Silverstripe project, so run it from a host project that requires this
+module through a **symlinked** path repository (`/tests` is `export-ignore`, so a Packagist or
+mirrored install contains no tests). Copy `phpunit.xml.dist` into the host as `phpunit.xml`, then:
+
+```bash
+# Silverstripe 6 (PHPUnit 11): the manifest is flushed through the environment
+SS_PHPUNIT_FLUSH=1 vendor/bin/phpunit --testsuite groupable-gridfield
+
+# Silverstripe 5 (PHPUnit 9): flush=1 must come AFTER a test path
+vendor/bin/phpunit vendor/restruct/silverstripe-groupable-gridfield/tests flush=1
+```
+
+Flush every run: a stale test manifest reports `Class ... not loaded by manifest`, which reads as a
+broken test. `.github/workflows/ci.yml` builds exactly this host for each supported major.
 
 ## Thanks
 
