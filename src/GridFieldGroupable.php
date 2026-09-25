@@ -1451,6 +1451,7 @@ class GridFieldGroupable
                     # re-evaluating it after the loop (for the message below) would yield 0
                     $unassignedCount = $itemsInGroup->count();
 
+                    # old (4.0 draft) rationale, superseded below:
                     # Delete the group FIRST (#11), while it is still linked to its owner and its items
                     # still point at it: the group's onBeforeDelete() can then resolve its parent, and a
                     # veto thrown there (e.g. ValidationException) aborts before anything was changed.
