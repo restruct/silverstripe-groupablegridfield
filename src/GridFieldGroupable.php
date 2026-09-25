@@ -901,6 +901,19 @@ class GridFieldGroupable
         $groupField = $this->getOption('groupField');
 
         if ($item) {
+            if ($list instanceof ManyManyList && array_key_exists($groupField, $list->getExtraFields())) {
+                # The assignment below writes the SOURCE record's join table, so check canEdit() on
+                # the source record, as the boundary-drag branch does: the check at the top only asks
+                # canView() on the item class for a many_many list. Without a form record there is
+                # nothing to check the write against, so refuse rather than write unchecked. Checked
+                # before the extension hook, so a refused request does not reach it.
+                $form = $grid->getForm();
+                $record = $form ? $form->getRecord() : null;
+                if (!$record || !$record->canEdit()) {
+                    $this->httpError(403, 'Permission denied');
+                }
+            }
+
             // Extension hook before assignment
             $this->extend('onBeforeAssignGroupItems', $list, $item, $group_key);
 
