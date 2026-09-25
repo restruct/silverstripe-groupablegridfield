@@ -1,14 +1,14 @@
-<phpunit bootstrap="vendor/silverstripe/cms/tests/bootstrap.php" colors="true">
-    <testsuite name="groupalble-gridfield">
-        <directory>tests</directory>
-    </testsuite>
-
-    <filter>
-        <whitelist addUncoveredFilesFromWhitelist="true">
-            <directory suffix=".php">src/</directory>
-            <exclude>
-                <directory suffix=".php">tests/</directory>
-            </exclude>
-        </whitelist>
-    </filter>
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- For running from a host project that requires this module through a symlinked path
+     repository (see README "Running the tests"); CI copies this file into its host project.
+     failOnWarning is pinned because whether a PHP warning fails a test is the runner's behaviour
+     and differs between PHPUnit 9 (SS5) and 11 (SS6).
+     failOnEmptyTestSuite: a suite that loaded no tests must fail, not pass. -->
+<phpunit bootstrap="vendor/silverstripe/framework/tests/bootstrap.php" colors="true"
+         failOnWarning="true" failOnEmptyTestSuite="true">
+    <testsuites>
+        <testsuite name="groupable-gridfield">
+            <directory>vendor/restruct/silverstripe-groupable-gridfield/tests</directory>
+        </testsuite>
+    </testsuites>
 </phpunit>

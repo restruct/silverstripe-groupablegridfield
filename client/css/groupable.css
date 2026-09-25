@@ -1,32 +1,114 @@
+/**
+ * GridFieldGroupable Styles
+ *
+ * Styles for group boundary rows in GridField, including:
+ * - Visual distinction for group divider rows (striped background)
+ * - Drag handle positioning for group reordering
+ * - Click-to-edit title styling (dashed border wrapper + input field)
+ * - Action buttons and metadata display
+ */
+
+/* ============================================
+ * Utility classes
+ * ============================================ */
 .cms .text-fade {
   color: #aaa;
 }
+
+/* ============================================
+ * Group boundary row styling
+ * ============================================ */
+
+/* Drag handle spacing adjustment for group boundary rows */
 .cms .ss-gridfield-orderable tr.groupable-bound .col-reorder .handle {
   padding: 14px 0 10px;
 }
+
+/* Striped background to visually distinguish group boundary rows from item rows */
 .cms table.grid-field__table tr.groupable-bound {
   background: repeating-linear-gradient(90deg, #dbe0e9, #dbe0e9 1px, transparent 1px, transparent 2px);
 }
 .cms table.grid-field__table tr.groupable-bound:hover {
   background: repeating-linear-gradient(90deg, #dbe0e9, #dbe0e9 1px, #f0f4f7 1px, #f0f4f7 2px);
 }
+
+/* Standard padding for group boundary cells */
 .cms table.grid-field__table tr.groupable-bound td {
   padding-top: 1rem;
   padding-bottom: 1rem;
   cursor: default;
 }
+
+/* ============================================
+ * Click-to-edit title styling
+ *
+ * The editable title displays as a dashed-border wrapper that
+ * matches the input field dimensions. Clicking reveals the actual
+ * input field for editing.
+ *
+ * Structure:
+ *   <span.group-title-editable>      <- dashed border wrapper (visible by default)
+ *     <strong.group-title>...</strong>
+ *   </span>
+ *   <input.group-title-input>        <- hidden by default, shown on click
+ * ============================================ */
+
+/* Wrapper styled to match input field dimensions (29.5px height, 3px radius) */
+.cms table.grid-field__table tr.groupable-bound .group-title-editable {
+  display: inline-block;
+  height: 29.5px;
+  line-height: 27.5px;
+  padding: 0 .5rem;
+  border: 1px dashed #aaa;
+  border-radius: 3px;
+  cursor: pointer;
+  /* Negative margins offset the element height to prevent row height increase */
+  margin-top: -.4rem;
+  margin-bottom: -.4rem;
+}
+
+/* Input field (hidden by default via .d-none, shown via JS on click) */
+.cms table.grid-field__table tr.groupable-bound .group-title-input {
+  /* Negative margins offset input height to prevent row height increase */
+  margin-top: -.4rem;
+  margin-bottom: -.4rem;
+}
+
+/* Hover state indicates clickability */
+.cms table.grid-field__table tr.groupable-bound .group-title-editable:hover {
+  background: #fff;
+}
+
+/* ============================================
+ * Group row content styling
+ * ============================================ */
+
+/* Arrow indicator showing items belong to this group */
 .cms table.grid-field__table tr.groupable-bound td .boundary-indicator {
   font-size: 130%;
 }
+
+/* Legacy: inline text input styling (MultiValueField mode) */
 .cms table.grid-field__table tr.groupable-bound td input.text {
   width: 32em;
   display: inline;
 }
+
+/* Alert/notice styling within group rows */
 .cms table.grid-field__table tr.groupable-bound td span.alert {
   padding: 0.5rem;
 }
+
+/* Hidden data fields (used for form state) */
 .cms table.grid-field__table tr.groupable-bound .groupable-data-hidden {
   display: none;
 }
 
-/*# sourceMappingURL=groupable.css.map */
+/* ============================================
+ * Toolbar button styling
+ * ============================================ */
+
+/* Spacing for "Add new group" button when not first in toolbar */
+.btn-toolbar>.ss-gridfield-add-new-do-group:not(:first-child) {
+  margin-left: 5px;
+}

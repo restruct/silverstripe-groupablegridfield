@@ -2,6 +2,7 @@
 
 namespace Restruct\Silverstripe\GroupableGridfield;
 
+use Closure;
 use Exception;
 use SilverStripe\Control\Controller;
 use SilverStripe\Control\HTTPRequest;
@@ -13,21 +14,100 @@ use SilverStripe\Forms\GridField\GridField_HTMLProvider;
 use SilverStripe\Forms\GridField\GridField_SaveHandler;
 use SilverStripe\Forms\GridField\GridField_URLHandler;
 use SilverStripe\Forms\HiddenField;
-use SilverStripe\Model\ArrayData;
 use SilverStripe\ORM\DataList;
 use SilverStripe\ORM\DataObject;
 use SilverStripe\ORM\DataObjectInterface;
+use SilverStripe\ORM\DataObjectSchema;
+use SilverStripe\ORM\DB;
 use SilverStripe\ORM\ManyManyList;
+use SilverStripe\ORM\ManyManyThroughList;
+# SS_List moved to SilverStripe\Model\List in SS6 with no alias, so a parameter typed with the
+# SS5 name throws a TypeError on SS6 as soon as it is called. Relation (same FQCN on both majors)
+# is what every groups relation list implements, so group-list parameters are typed with it.
+# Correction: they are left UNTYPED instead. A groups method may return a plain filtered DataList
+# (2.x accepted any SS_List), which is not a Relation; a Relation type made that a TypeError, an
+# Error that the handlers' catch (Exception) does not catch. Relation is kept for the docblocks.
+//use SilverStripe\ORM\SS_List;
+use SilverStripe\ORM\Relation;
+# ArrayData is NOT imported: it moved namespace in Silverstripe 6 (View\ArrayData -> Model\ArrayData)
+# with no alias left behind, so it is resolved per major in create_array_data() below
+//use SilverStripe\View\ArrayData;
 use SilverStripe\View\Requirements;
 use Symbiote\GridFieldExtensions\GridFieldOrderableRows;
 use Symbiote\MultiValueField\Fields\KeyValueField;
 
-class GridFieldGroupable extends RequestHandler implements GridField_HTMLProvider, GridField_ColumnProvider, GridField_URLHandler, GridField_SaveHandler
+class GridFieldGroupable
+    extends RequestHandler
+    implements GridField_HTMLProvider,
+        GridField_ColumnProvider,
+        GridField_URLHandler,
+        GridField_SaveHandler
 {
 
     private static $allowed_actions = [
         'handleGroupAssignment',
+        'handleGroupCreate',
+        'handleGroupReorder',
+        'handleGroupAction',
+        'handleGroupDelete',
+        'handleGroupTitleUpdate',
     ];
+
+    /**
+     * The field on subjects to hold group key
+     *
+     * @var string
+     */
+    protected $groupField;
+
+    /**
+     * The label for field on subjects to hold group key
+     *
+     * @var string
+     */
+    protected $groupFieldLabel;
+
+    /**
+     * fallback/unassigned group name
+     *
+     * @var string
+     */
+    protected $groupUnassignedName;
+
+    /**
+     * The list of available groups (key/value) or null if providing $groupsFieldNameOnSource
+     *
+     * @var array
+     */
+    protected $groupsAvailable;
+
+    /**
+     * The database field on the source record which provides the groups (MultiValueField)
+     *
+     * @see setSortField()
+     * @var string
+     */
+    protected $groupsFieldOnSource;
+
+    /**
+     * If true, group assignments are saved immediately via AJAX.
+     * If false, they are saved when the form is submitted.
+     *
+     * NB: FALLBACK ONLY — when a GridFieldOrderableRows component is present (it effectively is
+     * required, see getHTMLFragments), immediate-mode is DERIVED from that component via
+     * getImmediateUpdate($grid). The JS keys off OrderableRows' `data-immediate-update` attribute,
+     * so a diverging own flag made drag-assignments silently revert on form save (JS deferred the
+     * per-row hidden inputs to form-save while handleSave skipped its persistence branch).
+     * Configure immediate-mode on GridFieldOrderableRows::setImmediateUpdate() instead.
+     */
+    public bool $immediateUpdate = true;
+
+    /**
+     * If true (default), saves item reorders without refreshing the full GridField.
+     * This preserves unsaved edits in EditableColumns.
+     * If false, full GridField refresh after each reorder.
+     */
+    public bool $softRefresh = true;
 
     /**
      * The row template to render this with
@@ -36,40 +116,148 @@ class GridFieldGroupable extends RequestHandler implements GridField_HTMLProvide
      */
     protected $dividerTemplate = 'GFGroupableDivider';
 
+    // ========================================
+    // DataObject Groups Mode (Phase 1)
+    // ========================================
+
+    /**
+     * Relation name on source record for DataObject groups (has_many/many_many).
+     * When set, enables DataObject mode instead of MultiValueField mode.
+     */
+    protected ?string $groupsRelation = null;
+
+    /**
+     * Field on group DataObject that provides the display name.
+     * Default: 'Title'
+     */
+    protected string $groupTitleField = 'Title';
+
+    /**
+     * Additional fields from group DataObject to serialize for JS template.
+     * These become available as {%=o.groupMeta.FieldName%} in templates.
+     */
+    protected array $groupMetadataFields = [];
+
+    /**
+     * Per-field render config for metadata fields.
+     * Keyed by field name, values are arrays with options:
+     * - 'badge' (bool) — render as badge
+     * - 'badgeClass' (string) — badge CSS class (default: 'badge-secondary')
+     * - 'icon' (string) — icon class to prepend (e.g. 'bi-bookmark-fill')
+     * - 'copyable' (bool) — add copy-to-clipboard button
+     * - 'element' (string) — wrapper element tag (default: 'span')
+     * - 'class' (string) — CSS classes on wrapper
+     */
+    protected array $groupMetadataConfig = [];
+
+    /**
+     * Whether the item field stores a FK ID (DataObject mode) or string key (legacy mode).
+     * Automatically set to true when setGroupsFromRelation() is called.
+     */
+    protected bool $groupFieldIsFK = false;
+
+    /**
+     * Sort field for groups (on DataObject or many_many relation).
+     * Inspired by GridFieldOrderableRows::$sortField.
+     */
+    protected ?string $groupSortField = null;
+
+    // ========================================
+    // Group Creation (Phase 2)
+    // ========================================
+
+    /**
+     * Custom handler for creating new groups (DataObject mode only).
+     *
+     * Callback signature: (GridField $gridField, DataObject $sourceRecord, array $groupData)
+     * Should return: ['success' => bool, 'group' => DataObject|null, 'message' => string]
+     *
+     * If not set, creates DataObject directly and adds to relation.
+     */
+    protected ?Closure $groupCreateHandler = null;
+
+    // ========================================
+    // Group Actions (Phase 4)
+    // ========================================
+
+    /**
+     * Custom action buttons for group rows (DataObject mode only).
+     *
+     * Array format: [
+     *   'action_name' => [
+     *     'icon' => 'font-icon-sync',
+     *     'title' => 'Sync to FUSE',
+     *     'handler' => Closure,
+     *   ],
+     * ]
+     *
+     * Handler signature: (GridField $gridField, DataObject $sourceRecord, DataObject $group, array $actionData)
+     * Should return: ['success' => bool, 'message' => string, 'redirect' => string|null]
+     */
+    protected array $groupActions = [];
+
+    // ========================================
+    // Group Delete Handling (Phase 5)
+    // ========================================
+
+    /**
+     * Behavior when deleting a group.
+     *
+     * 'unassign' (default) - Unassign items from the group (set to null), then delete group
+     * 'prevent' - Prevent deletion if items are assigned to the group
+     * 'callback' - Use custom handler for deletion logic
+     */
+    protected string $deleteMode = 'unassign';
+
+    /**
+     * Custom handler for group deletion (only used when deleteMode is 'callback').
+     *
+     * Callback signature: (GridField $gridField, DataObject $group, DataList $itemsInGroup)
+     * Should return: ['success' => bool, 'message' => string]
+     */
+    protected ?Closure $groupDeleteHandler = null;
+
+    // ========================================
+    // Inline Title Editing (Phase 5)
+    // ========================================
+
+    /**
+     * Whether group title is editable inline.
+     * When true, an input field replaces the static title text.
+     */
+    protected bool $editableGroupTitle = false;
+
+    /**
+     * Custom handler for group title updates (DataObject mode only).
+     *
+     * Callback signature: (GridField $gridField, DataObject $sourceRecord, DataObject $group, string $newTitle)
+     * Should return: ['success' => bool, 'message' => string]
+     *
+     * If not set, updates the group's title field directly.
+     */
+    protected ?Closure $groupTitleUpdateHandler = null;
+
     /**
      * @param string $groupField field on subjects to hold group key
      * @param string $groupFieldLabel label for field on subjects to hold group key
      * @param string $groupUnassignedName fallback/unassigned group name
      * @param array $groupsAvailable list of groups (key value)
      * @param string $groupsFieldOnSource MultiValue field on source record to provide groups
-     * @param string $groupFieldOnSubject
      */
     public function __construct(
-        /**
-         * The field on subjects to hold group key
-         */
-        protected $groupField = 'Group',
-        /**
-         * The label for field on subjects to hold group key
-         */
-        protected $groupFieldLabel = 'Group',
-        /**
-         * fallback/unassigned group name
-         */
-        protected $groupUnassignedName = '[none/inactive]',
-        /**
-         * The list of available groups (key/value) or null if providing $groupsFieldNameOnSource
-         */
-        protected $groupsAvailable = [],
-        /**
-         * The database field on the source record which provides the groups (MultiValueField)
-         *
-         * @see setSortField()
-         */
-        protected $groupsFieldOnSource = null
+        $groupFieldOnSubject = 'Group',
+        $groupFieldLabel = 'Group',
+        $groupUnassignedName = '[none/inactive]',
+        $groupsAvailable = [],
+        $groupsFieldOnSource = null
     )
     {
         parent::__construct();
+        $this->groupField = $groupFieldOnSubject;
+        $this->groupFieldLabel = $groupFieldLabel;
+        $this->groupUnassignedName = $groupUnassignedName;
+        $this->groupsAvailable = $groupsAvailable;
+        $this->groupsFieldOnSource = $groupsFieldOnSource;
     }
 
     /**
@@ -94,6 +282,432 @@ class GridFieldGroupable extends RequestHandler implements GridField_HTMLProvide
         return $this->$option;
     }
 
+    // ========================================
+    // DataObject Groups Mode Setters/Getters
+    // ========================================
+
+    /**
+     * Configure groups from a DataObject relation (has_many or many_many).
+     * This enables DataObject mode and automatically sets groupFieldIsFK = true.
+     *
+     * @param string $relationName The relation name on the source record
+     * @return $this
+     */
+    public function setGroupsFromRelation(string $relationName): self
+    {
+        $this->groupsRelation = $relationName;
+        $this->groupFieldIsFK = true;
+        return $this;
+    }
+
+    /**
+     * Get the relation name for DataObject groups.
+     */
+    public function getGroupsRelation(): ?string
+    {
+        return $this->groupsRelation;
+    }
+
+    /**
+     * Set which field on the group DataObject provides the display name.
+     *
+     * @param string $field Field name (default: 'Title')
+     * @return $this
+     */
+    public function setGroupTitleField(string $field): self
+    {
+        $this->groupTitleField = $field;
+        return $this;
+    }
+
+    /**
+     * Get the title field for group DataObjects.
+     */
+    public function getGroupTitleField(): string
+    {
+        return $this->groupTitleField;
+    }
+
+    /**
+     * Set additional fields from group DataObject to serialize for JS template.
+     * These become available as {%=o.groupMeta.FieldName%} in templates.
+     *
+     * Accepts flat array or associative array with per-field render config:
+     *   ['Code', 'ContentSummary']                              // flat (backward compatible)
+     *   ['Code' => ['badge' => true, 'icon' => 'bi-bookmark-fill'], 'ContentSummary' => [...]]
+     *
+     * @param array $fields List of field names, or field => config pairs (mixed is allowed)
+     * @return $this
+     */
+    public function setGroupMetadataFields(array $fields): self
+    {
+        $this->groupMetadataFields = [];
+        $this->groupMetadataConfig = [];
+
+        foreach ($fields as $key => $value) {
+            if (is_int($key)) {
+                # Flat entry: 'Code'
+                $this->groupMetadataFields[] = $value;
+                $this->groupMetadataConfig[$value] = [];
+            } else {
+                # Associative: 'Code' => ['badge' => true, ...]
+                $this->groupMetadataFields[] = $key;
+                $this->groupMetadataConfig[$key] = $value;
+            }
+        }
+
+        return $this;
+    }
+
+    /**
+     * Get the metadata fields for group DataObjects.
+     */
+    public function getGroupMetadataFields(): array
+    {
+        return $this->groupMetadataFields;
+    }
+
+    /**
+     * Set whether the item field stores a FK ID (true) or string key (false).
+     * This is automatically set to true when setGroupsFromRelation() is called.
+     *
+     * @param bool $isFK
+     * @return $this
+     */
+    public function setGroupFieldIsFK(bool $isFK): self
+    {
+        $this->groupFieldIsFK = $isFK;
+        return $this;
+    }
+
+    /**
+     * Check if item field stores FK ID (DataObject mode).
+     */
+    public function getGroupFieldIsFK(): bool
+    {
+        return $this->groupFieldIsFK;
+    }
+
+    /**
+     * Set the sort field for groups (on DataObject or many_many relation).
+     * Inspired by GridFieldOrderableRows::setSortField().
+     *
+     * @param string $field Sort field name
+     * @return $this
+     */
+    public function setGroupSortField(string $field): self
+    {
+        $this->groupSortField = $field;
+        return $this;
+    }
+
+    /**
+     * Get the sort field for groups.
+     */
+    public function getGroupSortField(): ?string
+    {
+        return $this->groupSortField;
+    }
+
+    /**
+     * Gets the table which contains the group sort field.
+     * Adapted from GridFieldOrderableRows::getSortTable().
+     *
+     * @param Relation|\SilverStripe\ORM\DataList $groupList The list of groups: a relation list, or
+     *        any DataList of group records (SS_List on 2.x); untyped because SS_List has a
+     *        different FQCN on SS5 and SS6
+     * @return string The table name
+     * @throws Exception If sort field cannot be found
+     */
+    // public function getGroupSortTable(SS_List $groupList): string  // old: SS5-only type, TypeError on SS6 (broke handleGroupReorder there)
+    // public function getGroupSortTable(Relation $groupList): string  // old (4.0 draft): narrower than 2.x, a plain DataList groups source threw a TypeError
+    public function getGroupSortTable($groupList): string
+    {
+        $field = $this->groupSortField;
+
+        if (!$field) {
+            throw new Exception('No group sort field configured');
+        }
+
+        if ($groupList instanceof ManyManyList) {
+            $extra = $groupList->getExtraFields();
+            if ($extra && array_key_exists($field, $extra)) {
+                return $groupList->getJoinTable();
+            }
+        } elseif ($groupList instanceof ManyManyThroughList) {
+            // For ManyManyThroughList, check the through/join class
+            $joinClass = $groupList->getJoinClass();
+            $schema = DataObject::getSchema();
+            $fieldTable = $schema->tableForField($joinClass, $field);
+            if ($fieldTable) {
+                return $fieldTable;
+            }
+        }
+
+        // Field is on the DataObject itself
+        $classes = ClassInfo::dataClassesFor($groupList->dataClass());
+        foreach ($classes as $class) {
+            // if (DataObject::singleton($class)->hasOwnTableDatabaseField($field)) {  // old: method no longer exists (SS5 or SS6) — every reorder with a sort field on the group DataObject errored
+            # Same test the old method made: is $field a DB column on THIS class's own table
+            if (DataObject::getSchema()->fieldSpec($class, $field, DataObjectSchema::DB_ONLY | DataObjectSchema::UNINHERITED)) {
+                return DataObject::getSchema()->tableName($class);
+            }
+        }
+
+        throw new Exception("Couldn't find group sort field '$field'");
+    }
+
+    /**
+     * Check if this component is in DataObject mode (vs MultiValueField mode).
+     */
+    public function isDataObjectMode(): bool
+    {
+        return $this->groupsRelation !== null;
+    }
+
+    // ========================================
+    // Group Creation Setters/Getters (Phase 2)
+    // ========================================
+
+    /**
+     * Set custom handler for creating new groups (DataObject mode only).
+     *
+     * Callback signature: (GridField $gridField, DataObject $sourceRecord, array $groupData)
+     * Should return: ['success' => bool, 'group' => DataObject|null, 'message' => string]
+     *
+     * If not set, creates DataObject directly and adds to relation.
+     *
+     * @param Closure $handler
+     * @return $this
+     */
+    public function setGroupCreateHandler(Closure $handler): self
+    {
+        $this->groupCreateHandler = $handler;
+        return $this;
+    }
+
+    /**
+     * Get the custom group creation handler.
+     */
+    public function getGroupCreateHandler(): ?Closure
+    {
+        return $this->groupCreateHandler;
+    }
+
+    // ========================================
+    // Group Actions Setters/Getters (Phase 4)
+    // ========================================
+
+    /**
+     * Add an action button to group rows (DataObject mode only).
+     *
+     * Inspired by GridFieldSaveToFuseButton closure pattern.
+     *
+     * NB parameter order is ($name, $title, $icon) and the handler receives
+     * ($gridField, $sourceRecord, $group, $actionData) — as documented in the README since the
+     * DataObject-mode release. Pre-2.4 the implementation deviated from its own docs (it took
+     * ($name, $icon, $title) and invoked handler($grid, $group, $record)), so README-following
+     * consumers got swapped icon/title and an ArgumentCountError on click.
+     *
+     * @param string $name Action identifier (used in URL and JS)
+     * @param string $title Button title/tooltip
+     * @param string $icon Font icon class (e.g., 'font-icon-sync')
+     * @param Closure $handler Handler receives: (GridField $grid, DataObject $sourceRecord, DataObject $group, array $actionData)
+     *                         Returns: ['success' => bool, 'message' => string, 'redirect' => string|null]
+     * @return $this
+     */
+    // public function addGroupAction(string $name, string $icon, string $title, Closure $handler): self  // old: icon/title order contradicted the README + only known consumer
+    public function addGroupAction(string $name, string $title, string $icon, Closure $handler): self
+    {
+        $this->groupActions[$name] = [
+            'icon' => $icon,
+            'title' => $title,
+            'handler' => $handler,
+        ];
+        return $this;
+    }
+
+    /**
+     * Remove a group action by name.
+     *
+     * @param string $name Action identifier
+     * @return $this
+     */
+    public function removeGroupAction(string $name): self
+    {
+        unset($this->groupActions[$name]);
+        return $this;
+    }
+
+    /**
+     * Get all registered group actions.
+     *
+     * @return array
+     */
+    public function getGroupActions(): array
+    {
+        return $this->groupActions;
+    }
+
+    /**
+     * Check if any group actions are registered.
+     */
+    public function hasGroupActions(): bool
+    {
+        return !empty($this->groupActions);
+    }
+
+    // ========================================
+    // Group Delete Handling Setters/Getters (Phase 5)
+    // ========================================
+
+    /**
+     * Set the behavior when deleting a group.
+     *
+     * @param string $mode 'unassign' (default), 'prevent', or 'callback'
+     * @param Closure|null $handler Required if mode is 'callback'
+     *        Receives: (GridField $gridField, DataObject $group, DataList $itemsInGroup)
+     *        Returns: ['success' => bool, 'message' => string]
+     * @return $this
+     */
+    public function setGroupDeleteBehavior(string $mode, ?Closure $handler = null): self
+    {
+        if (!in_array($mode, ['unassign', 'prevent', 'callback'])) {
+            throw new \InvalidArgumentException("Invalid delete mode: $mode. Must be 'unassign', 'prevent', or 'callback'");
+        }
+
+        if ($mode === 'callback' && !$handler) {
+            throw new \InvalidArgumentException("Delete mode 'callback' requires a handler Closure");
+        }
+
+        $this->deleteMode = $mode;
+        $this->groupDeleteHandler = $handler;
+        return $this;
+    }
+
+    /**
+     * Get the current delete mode.
+     */
+    public function getDeleteMode(): string
+    {
+        return $this->deleteMode;
+    }
+
+    /**
+     * Get the custom delete handler.
+     */
+    public function getGroupDeleteHandler(): ?Closure
+    {
+        return $this->groupDeleteHandler;
+    }
+
+    // ========================================
+    // Inline Title Editing Setters/Getters (Phase 5)
+    // ========================================
+
+    /**
+     * Enable or disable inline group title editing.
+     *
+     * When enabled, the group title becomes an editable input field.
+     * Changes are saved via AJAX when the input loses focus.
+     *
+     * @param bool $editable
+     * @param Closure|null $handler Optional custom handler for title updates
+     *        Receives: (GridField $gridField, DataObject $sourceRecord, DataObject $group, string $newTitle)
+     *        Returns: ['success' => bool, 'message' => string]
+     * @return $this
+     */
+    public function setEditableGroupTitle(bool $editable = true, ?Closure $handler = null): self
+    {
+        $this->editableGroupTitle = $editable;
+        if ($handler) {
+            $this->groupTitleUpdateHandler = $handler;
+        }
+        return $this;
+    }
+
+    /**
+     * Check if group title is editable.
+     */
+    public function isEditableGroupTitle(): bool
+    {
+        return $this->editableGroupTitle;
+    }
+
+    /**
+     * Get the custom title update handler.
+     */
+    public function getGroupTitleUpdateHandler(): ?Closure
+    {
+        return $this->groupTitleUpdateHandler;
+    }
+
+    // ========================================
+    // Soft Refresh Option
+    // ========================================
+
+    /**
+     * Enable or disable soft refresh mode.
+     *
+     * When enabled, item reorders save without refreshing the full GridField.
+     * This preserves unsaved edits in EditableColumns but doesn't update
+     * visual feedback like row order badges.
+     *
+     * @param bool $soft
+     * @return $this
+     */
+    public function setSoftRefresh(bool $soft = true): self
+    {
+        $this->softRefresh = $soft;
+        return $this;
+    }
+
+    /**
+     * Check if soft refresh is enabled.
+     */
+    public function isSoftRefresh(): bool
+    {
+        return $this->softRefresh;
+    }
+
+    /**
+     * Resolve whether group assignments are saved immediately via AJAX.
+     *
+     * Derived from the GridFieldOrderableRows component when present: the groupable JS keys off
+     * OrderableRows' `data-immediate-update` attribute, so the PHP save paths MUST follow the same
+     * source of truth. When the flags diverged (OrderableRows::setImmediateUpdate(false) with this
+     * component's own $immediateUpdate still true), the JS correctly deferred drag-assignments to
+     * form-save via per-row hidden inputs, but handleSave() skipped its persistence branch — the
+     * item LOOKED moved and silently reverted after save.
+     * The public $immediateUpdate property is only consulted when no OrderableRows is configured.
+     */
+    public function getImmediateUpdate(GridField $grid): bool
+    {
+        $orderable = $grid->getConfig()->getComponentByType(GridFieldOrderableRows::class);
+
+        # NB symbiote's property is protected — always go through its getter (direct access fatals)
+        return $orderable ? (bool) $orderable->getImmediateUpdate() : $this->immediateUpdate;
+    }
+
+    /**
+     * Build an ArrayData for the running Silverstripe major.
+     *
+     * The class moved from SilverStripe\View\ArrayData (SS5) to SilverStripe\Model\ArrayData (SS6)
+     * with no alias, so neither name can be imported on a line that supports both: an import names
+     * exactly one of them, and the other major then fails with "class not found" on first render.
+     *
+     * @internal shared by this module's components; not part of the public API
+     * @param array $data
+     * @return \SilverStripe\Model\ArrayData|\SilverStripe\View\ArrayData
+     */
+    public static function create_array_data(array $data)
+    {
+        $class = class_exists('SilverStripe\\Model\\ArrayData')
+            ? 'SilverStripe\\Model\\ArrayData'
+            : 'SilverStripe\\View\\ArrayData';
+
+        return $class::create($data);
+    }
 
     /**
      * Convenience function to have the requirements included
@@ -110,6 +724,11 @@ class GridFieldGroupable extends RequestHandler implements GridField_HTMLProvide
     {
         return [
             'POST group_assignment' => 'handleGroupAssignment',
+            'POST group_create' => 'handleGroupCreate',
+            'POST group_reorder' => 'handleGroupReorder',
+            'POST group_action/$GroupID/$ActionName' => 'handleGroupAction',
+            'POST group_delete/$GroupID' => 'handleGroupDelete',
+            'POST group_title_update/$GroupID' => 'handleGroupTitleUpdate',
         ];
     }
 
@@ -128,30 +747,116 @@ class GridFieldGroupable extends RequestHandler implements GridField_HTMLProvide
         // set ajax urls / vars
         $grid->addExtraClass('ss-gridfield-groupable');
         $grid->setAttribute('data-url-group-assignment', $grid->Link('group_assignment'));
+        $grid->setAttribute('data-url-group-reorder', $grid->Link('group_reorder'));
         // setoptions [groupUnassignedName, groupFieldLabel, groupField, groupsAvailable]
         $grid->setAttribute('data-groupable-unassigned', $this->getOption('groupUnassignedName'));
         $grid->setAttribute('data-groupable-role', $this->getOption('groupFieldLabel'));
         $grid->setAttribute('data-groupable-itemfield', $this->getOption('groupField'));
+        // DataObject mode specific attributes
+        $grid->setAttribute('data-groupable-sortable', $this->groupSortField ? 'true' : 'false');
+        $grid->setAttribute('data-url-group-action', $grid->Link('group_action'));
+        $grid->setAttribute('data-url-group-delete', $grid->Link('group_delete'));
+        $grid->setAttribute('data-groupable-delete-mode', $this->deleteMode);
+        $grid->setAttribute('data-groupable-editable-title', $this->editableGroupTitle ? 'true' : 'false');
+        $grid->setAttribute('data-url-group-title-update', $grid->Link('group_title_update'));
+        $grid->setAttribute('data-groupable-soft-refresh', $this->softRefresh ? 'true' : 'false');
 
-        // Get groups from source record if string MultiValueField name
-//        $grid->setAttribute('data-groupable-groups', json_encode( $this->getOption('groupsAvailable') ) );
-        $groups = $this->getOption('groupsAvailable');
-        if (!$groups && $this->groupsFieldOnSource && ($form = $grid->getForm()) && ($record = $form->getRecord())) { //&& $record->hasDatabaseField($groups)
-            $groups = $record->dbObject($this->groupsFieldOnSource)->getValues();
+        // Serialize group actions for JS (without handlers)
+        if ($this->hasGroupActions()) {
+            $actionsForJs = [];
+            foreach ($this->groupActions as $name => $action) {
+                $actionsForJs[$name] = [
+                    'icon' => $action['icon'],
+                    'title' => $action['title'],
+                ];
+            }
+            $grid->setAttribute('data-groupable-actions', json_encode($actionsForJs));
+        }
+
+        // Get groups - either from DataObject relation or MultiValueField
+        $groups = [];
+        $mode = 'multivalue'; // default mode
+
+        if ($this->isDataObjectMode() && ($form = $grid->getForm()) && ($record = $form->getRecord())) {
+            // DataObject mode: load groups from has_many/many_many relation
+            $mode = 'dataobject';
+            $relationName = $this->groupsRelation;
+            $groupList = $record->$relationName();
+
+            // Apply sorting if configured
+            if ($this->groupSortField) {
+                $groupList = $groupList->sort($this->groupSortField);
+            }
+
+            // Serialize groups with metadata
+            // Use array (not object keyed by ID) to preserve sort order in JSON
+            // JavaScript objects sort numeric keys automatically, breaking our sort order
+            foreach ($groupList as $group) {
+                $groupData = [
+                    'id' => $group->ID,
+                    'name' => $group->{$this->groupTitleField},
+                ];
+                // Add configured metadata fields
+                foreach ($this->groupMetadataFields as $field) {
+                    $groupData[$field] = $group->$field;
+                }
+                $groups[] = $groupData;
+            }
+        } else {
+            // Legacy mode: MultiValueField or static array
+            $groups = $this->getOption('groupsAvailable');
+            if (!$groups && $this->groupsFieldOnSource && ($form = $grid->getForm()) && ($record = $form->getRecord())) {
+                $groups = $record->dbObject($this->groupsFieldOnSource)->getValues();
+            }
         }
 
         $grid->setAttribute('data-groupable-groups', json_encode($groups));
+        $grid->setAttribute('data-groupable-mode', $mode);
+
+        # Serialize per-field metadata render config for JS template
+        if (!empty($this->groupMetadataConfig)) {
+            $grid->setAttribute('data-groupable-meta-config', json_encode($this->groupMetadataConfig));
+        }
 
         // insert divider js tmpl
         $groupsField = (is_string($this->getOption('groupsFieldOnSource')) ? $this->getOption('groupsFieldOnSource') : '');
-        $data = new ArrayData([
+        // $data = new ArrayData([  // old: SS5-only class name, see create_array_data()
+        $data = self::create_array_data([
             'ColSpan' => $grid->getColumnCount() - 1,
             'GroupFieldLabel' => $this->groupFieldLabel,
             'GroupsFieldNameOnSource' => $groupsField,
+            # Grid name namespaces the divider inputs ({GridName}[{groupsField}][key][]) so submitted
+            # groups data arrives inside the grid's own value (see handleSave) instead of as a
+            # top-level request var that had to be plucked from Controller::curr()
+            'GridName' => $grid->getName(),
+            'IsDataObjectMode' => $this->isDataObjectMode(),
+            'HasGroupActions' => $this->hasGroupActions(),
         ]);
 
+        // Select template: use DataObject template if in DataObject mode and no custom template set
+        $template = $this->dividerTemplate;
+        // if ($this->isDataObjectMode() && $template === 'GFGroupableDivider') {
+        //     $template = 'GFDataObjectGroupableDivider';
+        // }
+        if ($template === 'GFGroupableDivider') {  # only auto-resolve when no custom template was set
+            if ($this->isDataObjectMode()) {
+                $template = 'GFDataObjectGroupableDivider';
+            } elseif (($addGroupButton = $grid->getConfig()->getComponentByType(GridFieldAddNewGroupButton::class))
+                && $addGroupButton->canRender($grid)
+            ) {
+                # Legacy mode: activate the enhanced divider (editable name inputs + per-section remove
+                # button) whenever the add-group button is present AND will render for this user.
+                # Resolved HERE at render time so component order no longer matters — the button used to
+                # mutate dividerTemplate from its own getHTMLFragments, which silently left the grid
+                # display-only when added after GridFieldGroupable (fragments render in component order).
+                # canRender() keeps divider editability in sync with the button's permission check, so
+                # readonly users keep the plain display-only divider.
+                $template = 'GFEnhancedGroupableDivider';
+            }
+        }
+
         return [
-            'after' => $data->renderWith($this->dividerTemplate)
+            'after' => $data->renderWith($template)
         ];
 
     }
@@ -171,34 +876,46 @@ class GridFieldGroupable extends RequestHandler implements GridField_HTMLProvide
         $modelClass = $grid->getModelClass();
         if ($list instanceof ManyManyList && !singleton($modelClass)->canView()) {
             $this->httpError(403);
-        } elseif (!($list instanceof ManyManyList) && !singleton($modelClass)->canEdit()) {
+        } else if (!($list instanceof ManyManyList) && !singleton($modelClass)->canEdit()) {
             $this->httpError(403);
         }
-
         //
 
         $item_id = $request->postVar('groupable_item_id');
         $group_key = $request->postVar('groupable_group_key');
-        if ($group_key == 'none') {
-            $group_key = '';
+
+        // Process group_key based on mode
+        if ($this->groupFieldIsFK) {
+            // DataObject mode: store FK ID (integer) or null for unassigned
+            $group_key = ($group_key === 'none' || $group_key === '' || $group_key === null)
+                ? null
+                : (int) $group_key;
+        } else {
+            // Legacy mode: store string key, empty string for unassigned
+            if ($group_key == 'none') {
+                $group_key = '';
+            }
         }
 
         $item = $list->byID($item_id);
         $groupField = $this->getOption('groupField');
 
-
-//        // only update  if we have an actual item (not if a boundary/whole group was dragged)
-//        if(!$item) return $grid->FieldHolder();
         if ($item) {
+            if ($list instanceof ManyManyList && array_key_exists($groupField, $list->getExtraFields())) {
+                # The assignment below writes the SOURCE record's join table, so check canEdit() on
+                # the source record, as the boundary-drag branch does: the check at the top only asks
+                # canView() on the item class for a many_many list. Without a form record there is
+                # nothing to check the write against, so refuse rather than write unchecked. Checked
+                # before the extension hook, so a refused request does not reach it.
+                $form = $grid->getForm();
+                $record = $form ? $form->getRecord() : null;
+                if (!$record || !$record->canEdit()) {
+                    $this->httpError(403, 'Permission denied');
+                }
+            }
 
-            // Update item with correct Group assigned (custom query required to write m_m_extraField)
-            //        DB::query(sprintf(
-            //            "UPDATE `%s` SET `%s` = '%s' WHERE `BlockID` = %d",
-            //            'SiteTree_Blocks',
-            //            'BlockArea',
-            //            $group_key,
-            //            $item_id
-            //        ));
+            // Extension hook before assignment
+            $this->extend('onBeforeAssignGroupItems', $list, $item, $group_key);
 
             if ($list instanceof ManyManyList && array_key_exists($groupField, $list->getExtraFields())) {
                 // update many_many_extrafields (MMList->add() with a new item adds a row, with existing item modifies a row)
@@ -209,14 +926,27 @@ class GridFieldGroupable extends RequestHandler implements GridField_HTMLProvide
                 $item->write();
             }
 
-            $this->extend('onAfterAssignGroupItems', $list);
+            // Extension hook after assignment
+            $this->extend('onAfterAssignGroupItems', $list, $item, $group_key);
 
         } else {
             // boundary was dragged
             $groupsFieldOnSource = $this->groupsFieldOnSource;
-            $groupData = $request->requestVar($groupsFieldOnSource);
+            // $groupData = $request->requestVar($groupsFieldOnSource);  // old: top-level request var — divider inputs are now namespaced under the grid name
+            $gridValue = $request->requestVar($grid->getName());
+            $groupData = (is_array($gridValue) && $groupsFieldOnSource) ? ($gridValue[$groupsFieldOnSource] ?? null) : null;
+            if (!$groupData && $groupsFieldOnSource) {
+                # BC fallback: custom divider templates may still submit pre-2.4 top-level {groupsField}[key][] inputs
+                $groupData = $request->requestVar($groupsFieldOnSource);
+            }
 
             if ($groupsFieldOnSource && $groupData && ($form = $grid->getForm()) && ($record = $form->getRecord())) {
+                # This branch writes the SOURCE record, so check canEdit() on it, as every other
+                # handler does: the check at the top only covers the item class
+                if (!$record->canEdit()) {
+                    $this->httpError(403, 'Permission denied');
+                }
+
                 // update groups on record
                 $this->updateGroupsOnRecord($record, $groupsFieldOnSource, $groupData);
 
@@ -231,14 +961,693 @@ class GridFieldGroupable extends RequestHandler implements GridField_HTMLProvide
 
         }
 
-        // Forward the request to GridFieldOrderableRows::handleReorder (if GridFieldOrderableRows)
-        $orderableRowsComponent = $grid->getConfig()->getComponentByType('GridFieldOrderableRows');
-        if ($orderableRowsComponent && $orderableRowsComponent->immediateUpdate) {
+        // Handle reordering via GridFieldOrderableRows
+        // JS now sends data in the same format as grid.reload(), so we can always use handleReorder
+        $orderableRowsComponent = $grid->getConfig()->getComponentByType(GridFieldOrderableRows::class);
+
+        // if ($orderableRowsComponent && $orderableRowsComponent->immediateUpdate) {  // old: $immediateUpdate is PROTECTED on GridFieldOrderableRows — this fataled in immediate/AJAX mode
+        if ($orderableRowsComponent && $orderableRowsComponent->getImmediateUpdate()) {
             return $orderableRowsComponent->handleReorder($grid, $request);
         }
 
         return $grid->FieldHolder();
 
+    }
+
+    /**
+     * Handle group creation request (DataObject mode only).
+     *
+     * Supports custom creation handlers for complex scenarios (e.g., FUSE API calls).
+     * Falls back to default DataObject creation if no handler is set.
+     *
+     * @param GridField $grid
+     * @param HTTPRequest $request
+     * @return string JSON response
+     */
+    public function handleGroupCreate($grid, $request)
+    {
+        // Only supported in DataObject mode
+        if (!$this->isDataObjectMode()) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Group creation is only supported in DataObject mode',
+            ]);
+        }
+
+        // Permission check
+        $form = $grid->getForm();
+        $record = $form ? $form->getRecord() : null;
+
+        if (!$record || !$record->canEdit()) {
+            $this->httpError(403, 'Permission denied');
+        }
+
+        // Get group data from request
+        $groupData = [
+            'name' => $request->postVar('group_name') ?? '',
+            'title' => $request->postVar('group_title') ?? $request->postVar('group_name') ?? '',
+        ];
+
+        // Collect any additional data from request with 'group_' prefix
+        foreach ($request->postVars() as $key => $value) {
+            if (str_starts_with($key, 'group_') && !in_array($key, ['group_name', 'group_title'])) {
+                $fieldName = substr($key, 6); // Remove 'group_' prefix
+                $groupData[$fieldName] = $value;
+            }
+        }
+
+        // Extension hook before creation
+        $this->extend('onBeforeCreateGroup', $grid, $record, $groupData);
+
+        $group = null;
+        $success = false;
+        $message = '';
+
+        try {
+            if ($this->groupCreateHandler) {
+                // Use custom handler (for complex creation like FUSE API calls)
+                $handler = $this->groupCreateHandler;
+                $result = $handler($grid, $record, $groupData);
+
+                // Handler should return array with 'success', 'group', 'message' keys
+                if (is_array($result)) {
+                    $success = $result['success'] ?? false;
+                    $group = $result['group'] ?? null;
+                    $message = $result['message'] ?? '';
+                } elseif ($result instanceof DataObject) {
+                    // Handler returned DataObject directly - treat as success
+                    $success = true;
+                    $group = $result;
+                    $message = 'Group created successfully';
+                } else {
+                    $success = false;
+                    $message = 'Invalid response from group creation handler';
+                }
+            } else {
+                // Default creation: create DataObject and add to relation
+                $relationName = $this->groupsRelation;
+                $relation = $record->$relationName();
+
+                // Get the class of related objects
+                $relationClass = $relation->dataClass();
+
+                // Create new group DataObject
+                $group = $relationClass::create();
+
+                // Set title field
+                $titleField = $this->groupTitleField;
+                $group->$titleField = $groupData['title'] ?? $groupData['name'] ?? 'New Group';
+
+                // Set any other matching fields from groupData
+                foreach ($groupData as $field => $value) {
+                    if ($group->hasField($field) && $field !== $titleField) {
+                        $group->$field = $value;
+                    }
+                }
+
+                // Set sort value if configured (place at end)
+                if ($this->groupSortField) {
+                    $sortField = $this->groupSortField;
+                    $maxSort = $relation->max($sortField) ?? 0;
+                    $group->$sortField = $maxSort + 1;
+                }
+
+                // Write the group
+                $group->write();
+
+                // Add to relation
+                $relation->add($group);
+
+                $success = true;
+                $message = 'Group created successfully';
+            }
+        } catch (Exception $e) {
+            $success = false;
+            $message = 'Error creating group: ' . $e->getMessage();
+        }
+
+        // Extension hook after creation
+        $this->extend('onAfterCreateGroup', $grid, $record, $group, $success, $message);
+
+        // Return JSON response with group data for JS
+        $response = [
+            'success' => $success,
+            'message' => $message,
+        ];
+
+        if ($success && $group) {
+            $response['group'] = [
+                'id' => $group->ID,
+                'name' => $group->{$this->groupTitleField},
+            ];
+
+            // Include metadata fields
+            foreach ($this->groupMetadataFields as $field) {
+                $response['group'][$field] = $group->$field;
+            }
+        }
+
+        // Return updated GridField HTML along with response
+        $response['html'] = $grid->FieldHolder();
+
+        return json_encode($response);
+    }
+
+    /**
+     * Handle group reordering request (DataObject mode only).
+     *
+     * Receives sorted group IDs and updates sort values.
+     *
+     * @param GridField $grid
+     * @param HTTPRequest $request
+     * @return string JSON response
+     */
+    public function handleGroupReorder($grid, $request)
+    {
+        // Only supported in DataObject mode with sort field
+        if (!$this->isDataObjectMode()) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Group reordering is only supported in DataObject mode',
+            ]);
+        }
+
+        if (!$this->groupSortField) {
+            return json_encode([
+                'success' => false,
+                'message' => 'No group sort field configured',
+            ]);
+        }
+
+        // Permission check
+        $form = $grid->getForm();
+        $record = $form ? $form->getRecord() : null;
+
+        if (!$record || !$record->canEdit()) {
+            $this->httpError(403, 'Permission denied');
+        }
+
+        // Get sorted IDs from request
+        $sortedIDs = $request->postVar('group_order');
+        if (!$sortedIDs || !is_array($sortedIDs)) {
+            return json_encode([
+                'success' => false,
+                'message' => 'No group order provided',
+            ]);
+        }
+
+        // Clean and validate IDs
+        $sortedIDs = array_filter(array_map('intval', $sortedIDs));
+
+        if (empty($sortedIDs)) {
+            return json_encode([
+                'success' => false,
+                'message' => 'No valid group IDs provided',
+            ]);
+        }
+
+        try {
+            $relationName = $this->groupsRelation;
+            $groupList = $record->$relationName();
+            $sortField = $this->groupSortField;
+
+            // Extension hook before reordering
+            $this->extend('onBeforeReorderGroups', $grid, $record, $groupList, $sortedIDs);
+
+            // Determine where sort field lives
+            $sortTable = $this->getGroupSortTable($groupList);
+
+            // Update sort values
+            $sort = 1;
+            foreach ($sortedIDs as $groupID) {
+                if ($groupList instanceof ManyManyList) {
+                    // Check if sort field is in extra fields
+                    $extra = $groupList->getExtraFields();
+                    if ($extra && array_key_exists($sortField, $extra)) {
+                        // Update via many_many extra fields
+                        $group = $groupList->byID($groupID);
+                        if ($group) {
+                            $groupList->add($group, [$sortField => $sort]);
+                        }
+                    } else {
+                        // Sort field is on the DataObject
+                        $group = $groupList->byID($groupID);
+                        if ($group) {
+                            $group->$sortField = $sort;
+                            $group->write();
+                        }
+                    }
+                } elseif ($groupList instanceof ManyManyThroughList) {
+                    // For through lists, update the join record
+                    $group = $groupList->byID($groupID);
+                    if ($group) {
+                        // Access through record and update
+                        $throughList = $groupList->filter('ID', $groupID);
+                        foreach ($throughList as $throughRecord) {
+                            $joinRecord = $throughRecord->getJoin();
+                            if ($joinRecord && $joinRecord->hasField($sortField)) {
+                                $joinRecord->$sortField = $sort;
+                                $joinRecord->write();
+                            } else {
+                                // Fallback: sort on main object
+                                $throughRecord->$sortField = $sort;
+                                $throughRecord->write();
+                            }
+                        }
+                    }
+                } else {
+                    // Regular has_many - sort field is on the DataObject
+                    $group = $groupList->byID($groupID);
+                    if ($group) {
+                        $group->$sortField = $sort;
+                        $group->write();
+                    }
+                }
+                $sort++;
+            }
+
+            // Extension hook after reordering
+            $this->extend('onAfterReorderGroups', $grid, $record, $groupList, $sortedIDs);
+
+            // Clear relation cache so FieldHolder renders with fresh data
+            $record->flushCache(true);
+
+            return json_encode([
+                'success' => true,
+                'message' => 'Groups reordered successfully',
+                'html' => $grid->FieldHolder(),
+            ]);
+
+        } catch (Exception $e) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Error reordering groups: ' . $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Handle group action request (DataObject mode only).
+     *
+     * Routes to registered action handlers based on group ID and action name.
+     *
+     * @param GridField $grid
+     * @param HTTPRequest $request
+     * @return string JSON response
+     */
+    public function handleGroupAction($grid, $request)
+    {
+        // Only supported in DataObject mode
+        if (!$this->isDataObjectMode()) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Group actions are only supported in DataObject mode',
+            ]);
+        }
+
+        // Permission check
+        $form = $grid->getForm();
+        $record = $form ? $form->getRecord() : null;
+
+        if (!$record || !$record->canEdit()) {
+            $this->httpError(403, 'Permission denied');
+        }
+
+        // Get action parameters from URL
+        $groupID = (int) $request->param('GroupID');
+        $actionName = $request->param('ActionName');
+
+        if (!$groupID || !$actionName) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Missing group ID or action name',
+            ]);
+        }
+
+        // Check if action is registered
+        if (!isset($this->groupActions[$actionName])) {
+            return json_encode([
+                'success' => false,
+                'message' => "Unknown action: $actionName",
+            ]);
+        }
+
+        // Get the group DataObject
+        $relationName = $this->groupsRelation;
+        $groupList = $record->$relationName();
+        $group = $groupList->byID($groupID);
+
+        if (!$group) {
+            return json_encode([
+                'success' => false,
+                'message' => "Group not found: $groupID",
+            ]);
+        }
+
+        try {
+            // Extension hook before action
+            $this->extend('onBeforeGroupAction', $grid, $group, $actionName, $record);
+
+            // Execute the action handler
+            $action = $this->groupActions[$actionName];
+            $handler = $action['handler'];
+            // $result = $handler($grid, $group, $record);  // old: contradicted the documented handler signature — README-following consumers received the group as $sourceRecord (and vice versa) and 4-param closures fataled
+            # Handler signature per README: ($gridField, $sourceRecord, $group, $actionData)
+            $result = $handler($grid, $record, $group, $request->postVars());
+
+            // Normalize result
+            if (!is_array($result)) {
+                $result = [
+                    'success' => (bool) $result,
+                    'message' => $result ? 'Action completed' : 'Action failed',
+                ];
+            }
+
+            // Extension hook after action
+            $this->extend('onAfterGroupAction', $grid, $group, $actionName, $result, $record);
+
+            // Add HTML if no redirect
+            if (!isset($result['redirect']) || !$result['redirect']) {
+                $result['html'] = $grid->FieldHolder();
+            }
+
+            return json_encode($result);
+
+        } catch (Exception $e) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Error executing action: ' . $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Handle group deletion request (DataObject mode only).
+     *
+     * Behavior depends on deleteMode:
+     * - 'unassign': Unassign items from group, then delete group
+     * - 'prevent': Return error if items are assigned to group
+     * - 'callback': Use custom handler
+     *
+     * @param GridField $grid
+     * @param HTTPRequest $request
+     * @return string JSON response
+     */
+    public function handleGroupDelete($grid, $request)
+    {
+        // Only supported in DataObject mode
+        if (!$this->isDataObjectMode()) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Group deletion is only supported in DataObject mode',
+            ]);
+        }
+
+        // Permission check
+        $form = $grid->getForm();
+        $record = $form ? $form->getRecord() : null;
+
+        if (!$record || !$record->canEdit()) {
+            $this->httpError(403, 'Permission denied');
+        }
+
+        // Get group ID from URL
+        $groupID = (int) $request->param('GroupID');
+
+        if (!$groupID) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Missing group ID',
+            ]);
+        }
+
+        // Get the group DataObject
+        $relationName = $this->groupsRelation;
+        $groupList = $record->$relationName();
+        $group = $groupList->byID($groupID);
+
+        if (!$group) {
+            return json_encode([
+                'success' => false,
+                'message' => "Group not found: $groupID",
+            ]);
+        }
+
+        // Get items assigned to this group
+        $list = $grid->getList();
+        $groupField = $this->getOption('groupField');
+        $itemsInGroup = $list->filter($groupField, $groupID);
+
+        try {
+            // Extension hook before deletion
+            $this->extend('onBeforeDeleteGroup', $grid, $group, $itemsInGroup, $record);
+
+            $result = null;
+
+            switch ($this->deleteMode) {
+                case 'prevent':
+                    if ($itemsInGroup->count() > 0) {
+                        return json_encode([
+                            'success' => false,
+                            'message' => sprintf(
+                                'Cannot delete group "%s": %d item(s) are still assigned',
+                                $group->{$this->groupTitleField},
+                                $itemsInGroup->count()
+                            ),
+                        ]);
+                    }
+                    // No items, safe to delete
+                    // $group->delete();  // old: left the many_many join row behind (only the group row went)
+                    $this->deleteGroupRecord($groupList, $group);
+                    $result = [
+                        'success' => true,
+                        'message' => 'Group deleted successfully',
+                    ];
+                    break;
+
+                case 'callback':
+                    if ($this->groupDeleteHandler) {
+                        $handler = $this->groupDeleteHandler;
+                        $result = $handler($grid, $group, $itemsInGroup);
+
+                        // Normalize result
+                        if (!is_array($result)) {
+                            $result = [
+                                'success' => (bool) $result,
+                                'message' => $result ? 'Group deleted' : 'Deletion failed',
+                            ];
+                        }
+                    } else {
+                        return json_encode([
+                            'success' => false,
+                            'message' => 'Callback mode requires a delete handler',
+                        ]);
+                    }
+                    break;
+
+                case 'unassign':
+                default:
+                    # Capture the count BEFORE unassigning — $itemsInGroup is a lazy DataList, so
+                    # re-evaluating it after the loop (for the message below) would yield 0
+                    $unassignedCount = $itemsInGroup->count();
+
+                    # old (4.0 draft) rationale, superseded below:
+                    # Delete the group FIRST (#11), while it is still linked to its owner and its items
+                    # still point at it: the group's onBeforeDelete() can then resolve its parent, and a
+                    # veto thrown there (e.g. ValidationException) aborts before anything was changed.
+                    # The items are found again below by their (still set) group key, so they are
+                    # unassigned all the same.
+                    // $this->deleteGroupRecord($groupList, $group);  // old (4.0 draft): deleting while the items still pointed at the group ran the group's cascade_deletes over them, so they were DELETED while the message said "unassigned"
+                    # Unassign the items first, THEN delete the group while it is still linked to its
+                    # owner (what #11 needs: onBeforeDelete() can resolve its parent), then drop a
+                    # many_many link. All of it in one transaction, so a veto thrown in the group's
+                    # onBeforeDelete() rolls the unassignment back and leaves everything as it was.
+                    # withTransaction() rethrows after the rollback; the catch below reports it.
+                    DB::get_conn()->withTransaction(function () use ($itemsInGroup, $list, $groupField, $groupList, $group) {
+                        // Unassign items from the group
+                        foreach ($itemsInGroup as $item) {
+                            if ($list instanceof ManyManyList && array_key_exists($groupField, $list->getExtraFields())) {
+                                // Update many_many extra field
+                                $list->add($item, [$groupField => null]);
+                            } else {
+                                // Update field on item
+                                $item->$groupField = null;
+                                $item->write();
+                            }
+                        }
+
+                        $this->deleteGroupRecord($groupList, $group);
+                    });
+
+                    // Remove group from relation and delete
+                    // $groupList->remove($group);  // old (#11): unlinked the group BEFORE delete(), so its onBeforeDelete() could not resolve the parent, and a veto thrown there left an unlinked but still existing record
+                    // $group->delete();  // now done by deleteGroupRecord() above, after the items are unassigned, before the link is dropped
+
+                    $result = [
+                        'success' => true,
+                        'message' => sprintf(
+                            'Group deleted. %d item(s) unassigned.',
+                            // $itemsInGroup->count()  // old: lazy list re-evaluates after unassigning → always reported 0
+                            $unassignedCount
+                        ),
+                    ];
+                    break;
+            }
+
+            // Extension hook after deletion
+            $this->extend('onAfterDeleteGroup', $grid, $group, $result, $record);
+
+            // Add updated HTML
+            $result['html'] = $grid->FieldHolder();
+
+            return json_encode($result);
+
+        } catch (Exception $e) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Error deleting group: ' . $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Delete a group record and drop its link to the source record, in that order (#11).
+     *
+     * delete() runs while the group is still linked, so its onBeforeDelete() can resolve its owner
+     * through the relation, and an exception thrown there leaves the group linked and intact.
+     * Only then is a many_many join row removed. That uses removeByID(), which deletes the join
+     * row in SQL (ManyManyList) or deletes the join record (ManyManyThroughList) and never writes
+     * the group itself.
+     *
+     * A has_many relation has nothing left to unlink: the link IS the FK column on the deleted row.
+     * HasManyList::remove() must NOT be called after delete(): it sets the FK to null and write()s
+     * the record, whose ID delete() has reset to 0, so the write would INSERT the group again as an
+     * orphan.
+     *
+     * @param Relation|\SilverStripe\ORM\DataList $groupList the source record's groups relation
+     *        (or a plain DataList of groups, which has no link to drop); untyped, see getGroupSortTable()
+     * @param DataObject $group a member of $groupList
+     */
+    // protected function deleteGroupRecord(Relation $groupList, DataObject $group): void  // old (4.0 draft): TypeError for a plain DataList groups source
+    protected function deleteGroupRecord($groupList, DataObject $group): void
+    {
+        $groupID = $group->ID;
+
+        $group->delete();
+
+        if ($groupList instanceof ManyManyList || $groupList instanceof ManyManyThroughList) {
+            $groupList->removeByID($groupID);
+        }
+    }
+
+    /**
+     * Handle group title update request (DataObject mode only).
+     *
+     * Updates the title field on the group DataObject.
+     * Supports custom handler for additional logic (e.g., FUSE sync).
+     *
+     * @param GridField $grid
+     * @param HTTPRequest $request
+     * @return string JSON response
+     */
+    public function handleGroupTitleUpdate($grid, $request)
+    {
+        // Only supported in DataObject mode
+        if (!$this->isDataObjectMode()) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Title update is only supported in DataObject mode',
+            ]);
+        }
+
+        // Check if title editing is enabled
+        if (!$this->editableGroupTitle) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Inline title editing is not enabled',
+            ]);
+        }
+
+        // Permission check
+        $form = $grid->getForm();
+        $record = $form ? $form->getRecord() : null;
+
+        if (!$record || !$record->canEdit()) {
+            $this->httpError(403, 'Permission denied');
+        }
+
+        // Get group ID from URL
+        $groupID = (int) $request->param('GroupID');
+
+        if (!$groupID) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Missing group ID',
+            ]);
+        }
+
+        // Get the new title from request body
+        $body = json_decode($request->getBody(), true);
+        $newTitle = trim($body['title'] ?? '');
+
+        if (empty($newTitle)) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Title cannot be empty',
+            ]);
+        }
+
+        // Get the group DataObject
+        $relationName = $this->groupsRelation;
+        $groupList = $record->$relationName();
+        $group = $groupList->byID($groupID);
+
+        if (!$group) {
+            return json_encode([
+                'success' => false,
+                'message' => "Group not found: $groupID",
+            ]);
+        }
+
+        try {
+            // Extension hook before title update
+            $this->extend('onBeforeGroupTitleUpdate', $grid, $group, $newTitle, $record);
+
+            if ($this->groupTitleUpdateHandler) {
+                // Use custom handler (for complex updates like FUSE sync)
+                $handler = $this->groupTitleUpdateHandler;
+                $result = $handler($grid, $record, $group, $newTitle);
+
+                // Normalize result
+                if (!is_array($result)) {
+                    $result = [
+                        'success' => (bool) $result,
+                        'message' => $result ? 'Title updated' : 'Update failed',
+                    ];
+                }
+            } else {
+                // Default: update the title field directly
+                $titleField = $this->groupTitleField;
+                $group->$titleField = $newTitle;
+                $group->write();
+
+                $result = [
+                    'success' => true,
+                    'message' => 'Title updated',
+                ];
+            }
+
+            // Extension hook after title update
+            $this->extend('onAfterGroupTitleUpdate', $grid, $group, $newTitle, $result, $record);
+
+            return json_encode($result);
+
+        } catch (Exception $e) {
+            return json_encode([
+                'success' => false,
+                'message' => 'Error updating title: ' . $e->getMessage(),
+            ]);
+        }
     }
 
     public function handleSave(GridField $grid, DataObjectInterface $record)
@@ -250,7 +1659,8 @@ class GridFieldGroupable extends RequestHandler implements GridField_HTMLProvide
 //        }
         $groupsFieldOnSource = $this->groupsFieldOnSource;
         // probably not the correct way to get the submitted data, but it works for now...
-        $groupData = Controller::curr()->getRequest()->requestVar($groupsFieldOnSource);
+        // $groupData = Controller::curr()->getRequest()->requestVar($groupsFieldOnSource);  // old: raw request read — divider inputs are now namespaced under the grid name and arrive in the grid's own submitted value
+        $groupData = $this->getSubmittedGroupsData($grid);
 
         if ($groupsFieldOnSource && $groupData && ($form = $grid->getForm()) && ($record = $form->getRecord())) {
             // update groups on record
@@ -258,42 +1668,47 @@ class GridFieldGroupable extends RequestHandler implements GridField_HTMLProvide
         }
 
         // and update each record's section if not already done via Ajax
-        if (!$this->immediateUpdate) {
+        // if (!$this->immediateUpdate) {  // old: own never-synced flag (default true) — with OrderableRows::setImmediateUpdate(false) the JS deferred to form-save but this branch got skipped, silently reverting drag-assignments
+        if (!$this->getImmediateUpdate($grid)) {
             $groupField = $this->getOption('groupField');
             $list = $grid->getList();
-            $values = Controller::curr()->getRequest()->requestVar($grid->getName());
-            //            "GridFieldGroupable"]=>
-            //              array(10) {
-            //                        [5]=>
-            //                array(1) {
-            //                            ["Section"]=>
-            //                  string(24) "group_5460_1491390152511"
+            // $values = $grid->Value();  // old: FormField::Value() is deprecated in 5.4 and REMOVED in SS6
+            # dataValue() returns the raw submitted value on SS5 and SS6 alike (FormField::$value, as
+            # Value() did on SS5 and getValue() does on SS6), so one call serves both majors
+            $values = $grid->dataValue();
+//            "GridFieldGroupable"]=>
+//              array(10) {
+//                        [5]=>
+//                array(1) {
+//                            ["Section"]=>
+//                  string(24) "group_5460_1491390152511"
             // Basic checks
-            if (!is_array($values)) {
-                return;
-            }
-
-            if (!array_key_exists('GridFieldGroupable', $values)) {
-                return;
-            }
-
+            if (!is_array($values)) return;
+            if (!array_key_exists('GridFieldGroupable', $values)) return;
             $groupData = $values['GridFieldGroupable'];
 
             // update each with new group
             foreach ($list as $item) {
                 // checks
-                if (!array_key_exists($item->ID, $groupData)) {
-                    continue;
-                }
-
-                if (!array_key_exists($groupField, $groupData[$item->ID])) {
-                    continue;
-                }
-
+                if (!array_key_exists($item->ID, $groupData)) continue;
+                if (!array_key_exists($groupField, $groupData[$item->ID])) continue;
                 $group_key = $groupData[$item->ID][$groupField];
-                if ($item->$groupField == $group_key) {
-                    continue;
-                } // skip unchanged
+
+                // Process group_key based on mode
+                if ($this->groupFieldIsFK) {
+                    // DataObject mode: store FK ID (integer) or null for unassigned
+                    $group_key = ($group_key === 'none' || $group_key === '' || $group_key === null)
+                        ? null
+                        : (int) $group_key;
+                } else {
+                    // Legacy mode: store string key, empty string for unassigned
+                    if ($group_key == 'none') {
+                        $group_key = '';
+                    }
+                }
+
+                if ($item->$groupField == $group_key) continue; // skip unchanged
+
                 // update
                 if ($list instanceof ManyManyList && array_key_exists($groupField, $list->getExtraFields())) {
                     // update many_many_extrafields (MMList->add() with a new item adds a row, with existing item modifies a row)
@@ -313,6 +1728,44 @@ class GridFieldGroupable extends RequestHandler implements GridField_HTMLProvide
 
     }
 
+    /**
+     * Read the submitted groups (key/val arrays from the enhanced divider inputs) for legacy mode.
+     *
+     * Primary source is the grid's own submitted value — the divider inputs are namespaced as
+     * {GridName}[{groupsField}][key][] so Form::loadDataFrom delivers them via $grid->dataValue(),
+     * same as the per-row [GridFieldGroupable] hidden inputs. Falls back to the raw request var
+     * for custom divider templates still using the pre-2.4 top-level {groupsField}[key][] naming.
+     *
+     * @return array|null ['key' => [...], 'val' => [...]] or null when nothing was submitted
+     */
+    protected function getSubmittedGroupsData(GridField $grid)
+    {
+        $groupsFieldOnSource = $this->groupsFieldOnSource;
+        if (!$groupsFieldOnSource) {
+            return null;
+        }
+
+        // $value = $grid->Value();  // old: removed in SS6, see handleSave()
+        $value = $grid->dataValue();
+        $groupData = is_array($value) ? ($value[$groupsFieldOnSource] ?? null) : null;
+
+        // if (!$groupData && Controller::has_curr()) {  // old: has_curr() is removed in SS6 (fatal)
+        # Valid on SS6 (no has_curr(); curr() returns null silently) and silent on an empty SS5 stack,
+        # where a bare curr() raises E_USER_WARNING - see SSKB profiles/core-principles.md (has_curr block)
+        // $controller = (method_exists(Controller::class, 'has_curr') && !Controller::has_curr()) ? null : Controller::curr();  // old (4.0 draft): ran on every save, so SS5 raised has_curr()'s 5.4.0 deprecation notice even when the grid value carried the groups
+        // if (!$groupData && $controller) {
+        # Only look for a controller when the fallback is needed (v2 short-circuited on !$groupData too)
+        if (!$groupData) {
+            $controller = (method_exists(Controller::class, 'has_curr') && !Controller::has_curr()) ? null : Controller::curr();
+            if ($controller) {
+                # BC fallback: pre-2.4 divider templates submitted top-level {groupsField}[key][] inputs
+                $groupData = $controller->getRequest()->requestVar($groupsFieldOnSource);
+            }
+        }
+
+        return $groupData;
+    }
+
     private function updateGroupsOnRecord($record, $groupsFieldOnSource, $groupData)
     {
         // use KeyValueField to serialize, filters out empty values as well
@@ -322,22 +1775,28 @@ class GridFieldGroupable extends RequestHandler implements GridField_HTMLProvide
         // unset 'none' (not sent anymore because 'none' key gets 'disabled' and is thus not submitted anymore
         // key has become '' (empty string) anyway
         // left here because why not...
-        $keyvals = $keyValueField->getValue();
-        // now a key-value list, with empty vals already filtered out
-        if (array_key_exists('none', $keyvals)) {
-            unset($keyvals['none']);
-        }
-
+        // $keyvals = $keyValueField->Value(); // old: FormField::Value() is removed in SS6
+        $keyvals = $keyValueField->dataValue(); // now a key-value list, with empty vals already filtered out
+        if (array_key_exists('none', $keyvals)) unset($keyvals['none']);
         $keyValueField->setValue($keyvals);
 
         // and save groups into record
         $keyValueField->saveInto($record); // record is an object, so can be updated from this scope
+
+        # ALSO refresh the record-level composite cache with the final map: if the record held a raw
+        # array for this field (e.g. from an earlier `$record->Sections = [...]` assignment in the same
+        # request), that stale array would WIN over the just-updated {field}Value column when the record
+        # is written — DataObject::write() serializes $record[$field] when present, silently reverting
+        # the saveInto() above. Setting the fresh map keeps cache, change-tracking and column in sync.
+        // $record->setField($groupsFieldOnSource, $keyValueField->Value());  // old: removed in SS6
+        $record->setField($groupsFieldOnSource, $keyValueField->dataValue());
     }
 
     /**
      * Gets the table which contains the group field.
      * (adapted from GridFieldOrderableRows)
      *
+     * @param DataList $list
      * @return string
      */
     public function getGroupTable(DataList $list)
@@ -356,18 +1815,23 @@ class GridFieldGroupable extends RequestHandler implements GridField_HTMLProvide
         $classes = ClassInfo::dataClassesFor($list->dataClass());
 
         foreach ($classes as $class) {
-            if (singleton($class)->hasOwnTableDatabaseField($field)) {
+            // if (singleton($class)->hasOwnTableDatabaseField($field)) {  // old: method no longer exists (SS5 or SS6)
+            if (DataObject::getSchema()->fieldSpec($class, $field, DataObjectSchema::DB_ONLY | DataObjectSchema::UNINHERITED)) {
                 return $class;
             }
         }
 
-        throw new Exception(sprintf("Couldn't find the sort field '%s'", $field));
+        throw new Exception("Couldn't find the sort field '$field'");
     }
 
     // (adapted from GridFieldOrderableRows)
     protected function getGroupTableClauseForIds(DataList $list, $ids)
     {
-        $value = is_array($ids) ? 'IN (' . implode(', ', array_map('intval', $ids)) . ')' : '= ' . (int)$ids;
+        if (is_array($ids)) {
+            $value = 'IN (' . implode(', ', array_map('intval', $ids)) . ')';
+        } else {
+            $value = '= ' . (int)$ids;
+        }
 
         if ($list instanceof ManyManyList) {
             $extra = $list->getExtraFields();
@@ -386,7 +1850,7 @@ class GridFieldGroupable extends RequestHandler implements GridField_HTMLProvide
             }
         }
 
-        return '"ID" ' . $value;
+        return "\"ID\" $value";
     }
 
 
