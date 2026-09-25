@@ -24,9 +24,13 @@ of 2.0.0. See [UPGRADING.md](UPGRADING.md).
 
 ### Security
 
-- Legacy (MultiValueField) mode: dragging a group boundary wrote the source record after checking
-  only the item class's permissions. It now also requires `canEdit()` on the source record, and
-  answers 403 otherwise, like every other handler.
+- Group assignment wrote the source record after checking only the item class's permissions, in
+  two places: dragging a group boundary (legacy mode, writes the source's groups field) and
+  dropping an item into another group when the group field is a many_many extraField (writes the
+  source's join table). Both now also require `canEdit()` on the source record (the grid form's
+  record) and answer 403 otherwise; an item drop on such a list with no form record is refused
+  too. An item drop that writes the item itself (has_many, or a group field on the item) is
+  unchanged: it checks `canEdit()` on the item class, as before.
 
 ### Fixed
 
@@ -41,7 +45,9 @@ of 2.0.0. See [UPGRADING.md](UPGRADING.md).
 - A group's `onBeforeDelete()` could not resolve its owner, and a veto thrown there left an unlinked
   but still existing group with its items already unassigned (#11). It now sees its owner, and a
   veto rolls the whole deletion back, item unassignment included. A group class with
-  `cascade_deletes` on its items keeps those items: they are unassigned before the group is deleted.
+  `cascade_deletes` on its items keeps the items reached through the grid's group field: they are
+  unassigned before the group is deleted. Items the cascade reaches another way (a different
+  relation, or items outside the grid's list) are still deleted by it.
 - 'prevent' mode left the many_many join row of a deleted group behind.
 - Silverstripe 5: a legacy-mode save no longer raises `Controller::has_curr()`'s deprecation notice
   when the groups arrive in the grid value; the controller is only looked up for the pre-2.4

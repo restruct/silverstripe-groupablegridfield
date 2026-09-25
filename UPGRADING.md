@@ -16,9 +16,11 @@ The code is 2.4.1 plus the changes below.
 3. **`getGroupSortTable()`** takes an untyped list parameter instead of `SS_List` (whose class
    name differs between Silverstripe 5 and 6). Only relevant if you override it in a subclass:
    drop the type from your signature. A groups method returning a plain `DataList` keeps working.
-4. **Legacy-mode boundary drags need `canEdit()` on the source record.** Dragging a group divider
-   writes the source record; it now answers 403 when the member cannot edit that record (before,
-   only the item class was checked).
+4. **Writes to the source record need `canEdit()` on it.** Dragging a group divider (legacy mode)
+   writes the source record, and dropping an item into another group writes the source's join
+   table when the group field is a many_many extraField. Both now answer 403 when the member cannot
+   edit the grid form's record (before, only the item class was checked). An item drop on such a
+   many_many list is also refused when the grid's form has no record to check against.
 5. **Flush after upgrading**, as for any module update.
 
 ## To 4.x from 3.0.0

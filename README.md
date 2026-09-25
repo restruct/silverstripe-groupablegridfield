@@ -167,7 +167,8 @@ $groupable->setGroupDeleteBehavior('callback', function ($gridField, $group, $it
   deleted while it is still linked to its owner, then a many_many (or many_many through) link is
   removed, all in one database transaction. The group's `onBeforeDelete()` still sees its owner,
   an exception thrown there rolls the whole operation back with nothing changed, and a group class
-  with `cascade_deletes` on its items keeps them (since 4.0).
+  with `cascade_deletes` on its items keeps the items reached through the grid's group field (since
+  4.0; items its cascade reaches another way, or outside the grid's list, are still deleted).
 - **`prevent`**: refuses while any item is assigned to the group; otherwise deletes it the same way.
 - **`callback`**: your handler does everything, in whatever order it needs.
 
