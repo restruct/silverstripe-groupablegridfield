@@ -5,6 +5,9 @@
     <!-- Don't sniff third party libraries -->
     <exclude-pattern>*/vendor/*</exclude-pattern>
     <exclude-pattern>*/thirdparty/*</exclude-pattern>
+    <!-- Browser tests: Playwright specs plus scratch-host fixtures, and their node_modules -->
+    <exclude-pattern>*/tests/browser/*</exclude-pattern>
+    <exclude-pattern>*/node_modules/*</exclude-pattern>
 
     <!-- Show progress and output sniff names on violation, and add colours -->
     <arg value="sp"/>

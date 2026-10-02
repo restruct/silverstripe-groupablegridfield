@@ -9,6 +9,8 @@
     <testsuites>
         <testsuite name="groupable-gridfield">
             <directory>vendor/restruct/silverstripe-groupable-gridfield/tests</directory>
+            <!-- Playwright browser tests (TypeScript, own runner, node_modules): not PHPUnit's -->
+            <exclude>vendor/restruct/silverstripe-groupable-gridfield/tests/browser</exclude>
         </testsuite>
     </testsuites>
 </phpunit>
