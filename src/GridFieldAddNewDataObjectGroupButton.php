@@ -203,10 +203,27 @@ class GridFieldAddNewDataObjectGroupButton implements GridField_HTMLProvider
             'Placeholder' => $this->placeholder,
             'InlineInput' => $this->inlineInput,
             'CreateURL' => $grid->Link('group_create'),
+            # Bootstrap 4 (SS5 CMS) or flat Bootstrap 5 (SS6 CMS) input-group markup (#14)
+            'UsesBootstrap4InputGroup' => $this->usesBootstrap4InputGroup(),
         ]);
 
         return [
             $this->fragment => $data->renderWith($this->template),
         ];
+    }
+
+    /**
+     * Whether to render the Bootstrap 4 input-group markup (button wrapped in .input-group-append)
+     * instead of the flat Bootstrap 5 markup (button as a direct child of .input-group).
+     *
+     * The Silverstripe 5 CMS (silverstripe/admin 2) ships Bootstrap 4; the Silverstripe 6 CMS
+     * (admin 3) ships Bootstrap 5, whose stylesheet has no rules for .input-group-append, so the
+     * wrapper broke the seam-join and the button did not sit flush with the input (#14). admin 3
+     * requires framework 6, so the framework major is an exact proxy: ViewLayerData only exists in
+     * framework 6. Same check as restruct/silverstripe-latlongfield.
+     */
+    protected function usesBootstrap4InputGroup(): bool
+    {
+        return !class_exists('SilverStripe\\View\\ViewLayerData');
     }
 }
