@@ -168,9 +168,9 @@ test('without the add-group button the dividers are display-only, and items stil
     expect(await layout(await openSource(page, 'mv', id))).toEqual(expected);
 });
 
-// Known bug, kept visible: the notice's default text is the Dutch string, so an English CMS shows
-// Dutch (the _t() default and comment arguments are swapped).
-test.fixme('the unsaved-group notice is in the CMS language (https://github.com/restruct/silverstripe-groupablegridfield/issues/15)', async ({ page }) => {
+// Regression (#15): the notice's default text was the Dutch string, so an English CMS showed
+// Dutch (the _t() default and comment arguments were swapped). Dutch now lives in lang/nl.yml.
+test('the unsaved-group notice is in the CMS language (https://github.com/restruct/silverstripe-groupablegridfield/issues/15)', async ({ page }) => {
     const { grid } = await freshSource(page, 'mv', 'MV notice');
     await grid.locator('button.ss-gridfield-add-new-group').click();
     await expect(grid.locator('tbody tr.groupable-bound').first().locator('.alert-warning')).toHaveText(

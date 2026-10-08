@@ -1,5 +1,14 @@
 # Changelog
 
+## 4.0.1 (unreleased)
+
+### Fixed
+
+- The notice on a newly added (unsaved) group divider in MultiValue mode was Dutch in every CMS
+  whatever its locale: the `_t()` default and translator comment were swapped. The default is now
+  the English text, and the Dutch moved to the new `lang/nl.yml` under the same entity
+  (`GridFieldExtensions.UnsavedGroupNotice`) (#15).
+
 ## 4.0.0 (2026-09-25)
 
 Silverstripe 5 and 6 from one codebase. This line is the `v2` code (2.4.1) made to run on

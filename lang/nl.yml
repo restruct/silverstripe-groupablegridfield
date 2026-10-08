@@ -1,0 +1,3 @@
+nl:
+  GridFieldExtensions:
+    UnsavedGroupNotice: 'Sla {record_singular_name} op alvorens {relation_label} aan deze (nieuwe) {group_label} toe te voegen'
