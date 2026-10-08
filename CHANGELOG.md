@@ -1,5 +1,19 @@
 # Changelog
 
+## 4.0.1 (2026-10-08)
+
+### Fixed
+
+- The notice on a newly added (unsaved) group divider in MultiValue mode was Dutch in every CMS
+  whatever its locale: the `_t()` default and translator comment were swapped. The default is now
+  the English text, and the Dutch moved to the new `lang/nl.yml` under the same entity
+  (`GridFieldExtensions.UnsavedGroupNotice`) (#15).
+- Silverstripe 6: the inline input of `GridFieldAddNewDataObjectGroupButton` wrapped its button in
+  Bootstrap 4's `.input-group-append`, which the Bootstrap 5 CMS has no rules for, so the button
+  did not join the input. The wrapper is now rendered on Silverstripe 5 only; Silverstripe 6 gets
+  flat Bootstrap 5 markup (#14). The non-inline variant (`setInlineInput(false)`) still targets a
+  modal that is never rendered; that half of #14 is open.
+
 ## 4.0.0 (2026-09-25)
 
 Silverstripe 5 and 6 from one codebase. This line is the `v2` code (2.4.1) made to run on

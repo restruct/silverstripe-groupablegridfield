@@ -111,6 +111,22 @@ test('dragging an item into "No section" unassigns it, and into an empty group a
     expect(await layout(await openSource(page, 'do', id))).toEqual(expected);
 });
 
+// Regression (#14): the SS6 CMS is on Bootstrap 5, which has no rules for Bootstrap 4's
+// .input-group-append wrapper, so the button did not join the input. On each major the button must
+// sit flush against the input with its joined (left) corners square.
+test('the inline add-group button sits flush against its input', async ({ page }) => {
+    const { grid } = await freshSource(page, 'do', 'DO flush');
+    const input = grid.locator('input.ss-gridfield-new-group-name');
+    const button = grid.locator('button.ss-gridfield-create-group-btn');
+    const i = await input.boundingBox();
+    const b = await button.boundingBox();
+    expect(i && b, 'input and button are rendered').toBeTruthy();
+    expect(Math.abs(b!.x - (i!.x + i!.width)), 'button starts where the input ends').toBeLessThanOrEqual(1);
+    expect(Math.abs(b!.y - i!.y), 'button and input share a top edge').toBeLessThanOrEqual(1);
+    expect(await button.evaluate((el) => getComputedStyle(el).borderTopLeftRadius)).toBe('0px');
+    expect(await input.evaluate((el) => getComputedStyle(el).borderTopRightRadius)).toBe('0px');
+});
+
 test('a new group is created from the inline input (button or Enter) and listed after the others', async ({ page }) => {
     const { id, grid } = await freshSource(page, 'do', 'DO create');
     const input = grid.locator('input.ss-gridfield-new-group-name');

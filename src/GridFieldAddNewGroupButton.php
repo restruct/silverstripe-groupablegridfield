@@ -122,10 +122,15 @@ class GridFieldAddNewGroupButton
             'Title' => ($this->title == _t('GridFieldExtensions.ADD', 'Add') ? $this->title . " $groupLabel" : $this->title),
             'GroupsRelationField' => $this->groupsRelationField,
             'AvailableGroups' => json_encode($groupsFromGrid),
+            # _t() takes (entity, default, translator comment, injection): the default must be the
+            # English text, the module ships no en.yml. The Dutch text was passed as the default (and
+            # the English as the comment), so every CMS showed Dutch whatever its locale (#15); the
+            # Dutch now lives in lang/nl.yml under the same entity. The key stays as it was so a
+            # project's own translation of it keeps working.
             'UnsavedGroupNotice' => _t(
                 'GridFieldExtensions.UnsavedGroupNotice',
-                'Sla {record_singular_name} op alvorens {relation_label} aan deze (nieuwe) {group_label} toe te voegen',
                 'Save {record_singular_name} before adding {relation_label} to this (unsaved) {group_label}',
+                'Notice on a newly added group divider; the record must be saved before items can be put in it',
                 [
                     'record_singular_name' => strtolower($record ? $record->singular_name(): 'record'),
                     'relation_label' => strtolower($grid ? $grid->Title(): 'items'),
