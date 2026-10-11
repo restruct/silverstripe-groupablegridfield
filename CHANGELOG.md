@@ -12,6 +12,9 @@
   admin still bundle for non-React code; the module renders its markup (hidden, in
   `GFAddNewDataObjectGroupButton.ss`) and opens it from `client/js/groupable.js`. This closes the
   second half of #14.
+- `GridFieldAddNewDataObjectGroupButton`: a second Enter (or a held one) while the create request was
+  still running sent another request and created the group twice, from the inline input as well as
+  from the dialog. `createGroup()` now does nothing while its input is disabled for a running request.
 
 ### Changed
 

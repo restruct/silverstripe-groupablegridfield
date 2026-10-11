@@ -550,6 +550,13 @@
                 var self = this;
                 var grid = this.getGridField();
                 input = input || this.find('.ss-gridfield-new-group-name');
+
+                // A request is already running for this input (it is disabled until that completes):
+                // a second Enter, or a held one, would otherwise create the group twice
+                if (input.prop('disabled')) {
+                    return false;
+                }
+
                 var groupName = input.val().trim();
 
                 if (!groupName) {

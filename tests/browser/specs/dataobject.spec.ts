@@ -368,3 +368,46 @@ test('without the inline input, "Add Group" opens a dialog to name the group (ht
     expect(await layout(grid)).toEqual(expected);
     expect(await layout(await openSource(page, 'do', id))).toEqual(expected);
 });
+
+// Regression: a second Enter while the create request was still running sent a second request and
+// created the group twice, in both the inline input and the dialog. The request is slowed down here
+// so the second Enter lands while the first is in flight.
+for (const setup of ['immediate', 'modal'] as const) {
+    test(`a double Enter creates the group once (${setup === 'modal' ? 'dialog' : 'inline input'})`, async ({ page }) => {
+        const { id, grid } = await freshSource(page, 'do', `DO double enter ${setup}`, setup);
+        await page.route('**/group_create', async (route) => {
+            await new Promise((r) => setTimeout(r, 1200));
+            await route.continue();
+        });
+        let requests = 0;
+        page.on('request', (r) => r.url().includes('/group_create') && requests++);
+
+        let input = grid.locator('input.ss-gridfield-new-group-name');
+        if (setup === 'modal') {
+            await grid.locator('button.ss-gridfield-add-group-modal-btn').click();
+            input = page.locator('.ui-dialog input.ss-gridfield-new-group-name');
+            await expect(input).toBeFocused();
+        }
+        await input.fill('Delta');
+        const posted = waitForGridPost(page, 'group_create');
+        await input.press('Enter');
+        // The second Enter goes straight to the input's handlers (keydown for the dialog, keypress
+        // for the inline input): whether a real key event still reaches an input that was just
+        // disabled depends on focus timing, which made a plain second press flaky as a regression.
+        await input.evaluate((el) => {
+            const $ = (window as unknown as { jQuery: (e: Element) => { trigger: (ev: unknown) => void } }).jQuery;
+            const jq = (window as unknown as { jQuery: { Event: (type: string, props: object) => unknown } }).jQuery;
+            $(el).trigger(jq.Event('keydown', { which: 13, keyCode: 13 }));
+            $(el).trigger(jq.Event('keypress', { which: 13, keyCode: 13 }));
+        });
+        await expectJsonSuccess(await posted);
+        await expect(divider(grid, 'Delta')).toBeVisible();
+        // give a second request, had one been sent, time to arrive and re-render the grid
+        await page.waitForTimeout(1600);
+
+        expect(requests, 'one create request').toBe(1);
+        const expected = [...SEEDED.slice(0, 3), ['Delta', []], SEEDED[3]];
+        expect(await layout(grid)).toEqual(expected);
+        expect(await layout(await openSource(page, 'do', id))).toEqual(expected);
+    });
+}
