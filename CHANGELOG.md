@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased (4.1.0)
+
+### Fixed
+
+- `GridFieldAddNewDataObjectGroupButton::setInlineInput(false)` did nothing: its button pointed
+  Bootstrap's modal data-api at `#add-group-modal-{GridFieldID}`, which nothing rendered, and neither
+  CMS loads Bootstrap's modal JavaScript. The button now opens a dialog to name the group, with Create
+  and Cancel buttons (Enter creates, Escape cancels), and creates it through the same endpoint and
+  `createGroup()` as the inline input. The dialog is jQuery UI's, which both the Silverstripe 5 and 6
+  admin still bundle for non-React code; the module renders its markup (hidden, in
+  `GFAddNewDataObjectGroupButton.ss`) and opens it from `client/js/groupable.js`. This closes the
+  second half of #14.
+
+### Changed
+
+- Custom copies of `GFAddNewDataObjectGroupButton.ss`: the non-inline branch no longer carries the
+  `data-toggle` / `data-bs-toggle` / `data-target` / `data-bs-target` attributes, and gains the hidden
+  `.ss-gridfield-add-group-dialog` markup the script opens. A copy that keeps the old branch renders a
+  button that still does nothing.
+- `createGroup()` (entwine, on `.ss-gridfield-add-new-do-group`) takes an optional input to read the
+  name from and returns the request (or `false` when nothing was sent), so the dialog can close
+  itself once the group exists.
+
 ## 4.0.1 (2026-10-08)
 
 ### Fixed

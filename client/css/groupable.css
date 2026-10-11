@@ -112,3 +112,16 @@
 .btn-toolbar>.ss-gridfield-add-new-do-group:not(:first-child) {
   margin-left: 5px;
 }
+
+/* ============================================
+ * Add-group dialog (GridFieldAddNewDataObjectGroupButton with setInlineInput(false), #14)
+ * ============================================ */
+
+/* The admin's legacy dialog styles position the title absolutely, because its own jQuery UI dialogs
+ * (iframes) bring their own header. On Silverstripe 5 that left a zero-height title bar with the
+ * title under the name input; in flow it sizes the bar on both majors (on Silverstripe 6 the bar is
+ * a Bootstrap .modal-header, whose flex layout then puts the close button on the right). The
+ * selector outweighs the admin's .ui-dialog .ui-dialog-titlebar.ui-widget-header .ui-dialog-title. */
+.ui-dialog.ss-gridfield-add-group-ui-dialog .ui-dialog-titlebar.ui-widget-header .ui-dialog-title {
+  position: static;
+}

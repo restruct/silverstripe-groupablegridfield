@@ -304,11 +304,67 @@ test('deferred saving (OrderableRows immediate update off): a drag marks the for
     expect(after.map(([name, items]) => [name, [...items].sort()])).toEqual([['Alpha', ['A2']], ['Beta', ['A1', 'B1']], ['Gamma', []], ['No section', ['U1']]]);
 });
 
-// Known bug, kept visible: the non-inline add-group button targets a modal that is never rendered,
-// so it does nothing.
-test.fixme('without the inline input, "Add Group" opens a dialog to name the group (https://github.com/restruct/silverstripe-groupablegridfield/issues/14)', async ({ page }) => {
-    const { grid } = await freshSource(page, 'do', 'DO modal', 'modal');
-    await expect(grid.locator('input.ss-gridfield-new-group-name')).toHaveCount(0);
-    await grid.locator('button.ss-gridfield-add-group-modal-btn').click();
-    await expect(page.locator('.modal.show')).toBeVisible();
+// Regression (#14): the non-inline add-group button targeted a Bootstrap modal that was never
+// rendered, and neither CMS loads Bootstrap's modal JS, so it did nothing. It now opens a jQuery UI
+// dialog (the dialog both CMS majors still ship for non-React code) that names and creates the group
+// through the same endpoint as the inline input.
+test('without the inline input, "Add Group" opens a dialog to name the group (https://github.com/restruct/silverstripe-groupablegridfield/issues/14)', async ({ page }) => {
+    const { id, grid } = await freshSource(page, 'do', 'DO modal', 'modal');
+    // No visible inline input: the only name input in the grid is the dialog's hidden template.
+    await expect(grid.locator('input.ss-gridfield-new-group-name')).toBeHidden();
+    const openButton = grid.locator('button.ss-gridfield-add-group-modal-btn');
+    const dialog = page.locator('.ui-dialog:has(.ss-gridfield-add-group-dialog)');
+
+    // Cancel closes the dialog without a request, and removes it again.
+    let requests = 0;
+    page.on('request', (r) => r.url().includes('/group_create') && requests++);
+    await openButton.click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('.ui-dialog-title')).toHaveText('Add Group');
+    const input = dialog.locator('input.ss-gridfield-new-group-name');
+    await expect(input).toBeFocused();
+    await expect(input).toHaveAttribute('placeholder', 'New group name...');
+    // The title sits in its own bar above the input. The admin's legacy dialog styles position it
+    // absolutely, which on Silverstripe 5 put it under the input (client/css/groupable.css).
+    const t = await dialog.locator('.ui-dialog-title').boundingBox();
+    const i = await input.boundingBox();
+    expect(t && i, 'title and input are rendered').toBeTruthy();
+    expect(t!.y + t!.height, 'the title ends above the input').toBeLessThanOrEqual(i!.y);
+    await dialog.locator('button.ss-gridfield-add-group-dialog-cancel').click();
+    await expect(dialog).toHaveCount(0);
+    // Escape does the same.
+    await openButton.click();
+    await expect(input).toBeFocused();
+    await input.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    expect(requests, 'cancel and Escape send nothing').toBe(0);
+
+    // An empty name sends nothing and keeps the dialog open.
+    await openButton.click();
+    await dialog.locator('button.ss-gridfield-add-group-dialog-create').click();
+    await expect(dialog).toBeVisible();
+    expect(requests, 'no create request for an empty name').toBe(0);
+
+    // With the dialog's button: the section is created, the grid re-rendered, the dialog gone.
+    await input.fill('Delta');
+    let posted = waitForGridPost(page, 'group_create');
+    await dialog.locator('button.ss-gridfield-add-group-dialog-create').click();
+    let json = await expectJsonSuccess(await posted);
+    expect((json.group as { name: string }).name).toBe('Delta');
+    await expect(divider(grid, 'Delta')).toBeVisible();
+    await expect(dialog).toHaveCount(0);
+
+    // With Enter, from the button of the re-rendered grid.
+    await openButton.click();
+    await expect(dialog).toBeVisible();
+    await dialog.locator('input.ss-gridfield-new-group-name').fill('Epsilon');
+    posted = waitForGridPost(page, 'group_create');
+    await dialog.locator('input.ss-gridfield-new-group-name').press('Enter');
+    json = await expectJsonSuccess(await posted);
+    await expect(divider(grid, 'Epsilon')).toBeVisible();
+    await expect(dialog).toHaveCount(0);
+
+    const expected = [...SEEDED.slice(0, 3), ['Delta', []], ['Epsilon', []], SEEDED[3]];
+    expect(await layout(grid)).toEqual(expected);
+    expect(await layout(await openSource(page, 'do', id))).toEqual(expected);
 });
