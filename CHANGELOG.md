@@ -10,8 +10,11 @@
   and Cancel buttons (Enter creates, Escape cancels), and creates it through the same endpoint and
   `createGroup()` as the inline input. The dialog is jQuery UI's, which both the Silverstripe 5 and 6
   admin still bundle for non-React code; the module renders its markup (hidden, in
-  `GFAddNewDataObjectGroupButton.ss`) and opens it from `client/js/groupable.js`. This closes the
-  second half of #14.
+  `GFAddNewDataObjectGroupButton.ss`) and opens it from `client/js/groupable.js`. While the create
+  request runs the dialog cannot be closed (buttons, X and Escape are off), and it closes itself once
+  the group exists. This closes the second half of #14.
+- `GridFieldAddNewDataObjectGroupButton`: after a group was created the re-rendered GridField left
+  focus on the page body. It now returns to the grid's add-group button, inline input or dialog.
 - `GridFieldAddNewDataObjectGroupButton`: a second Enter (or a held one) while the create request was
   still running sent another request and created the group twice, from the inline input as well as
   from the dialog. `createGroup()` now does nothing while its input is disabled for a running request.

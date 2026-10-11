@@ -411,3 +411,67 @@ for (const setup of ['immediate', 'modal'] as const) {
         expect(await layout(await openSource(page, 'do', id))).toEqual(expected);
     });
 }
+
+// Regression: closing the dialog (Escape, its X) while the create request was running destroyed the
+// widget, and the request's success handler then called dialog('close') on it and threw. jQuery
+// 3.7 does not catch a throwing callback, so jQuery.active stayed at 1 for good, while the group
+// was still created. The dialog now stays open, Escape and its X disabled, until the request is done.
+test('the add-group dialog cannot be closed while its create request runs', async ({ page }) => {
+    // No uncaught error: the auto 'guard' fixture (support.ts) fails the spec on any, which is
+    // how the old dialog('close') throw shows up here.
+    const { grid } = await freshSource(page, 'do', 'DO dialog in flight', 'modal');
+    await page.route('**/group_create', async (route) => {
+        await new Promise((r) => setTimeout(r, 1200));
+        await route.continue();
+    });
+
+    await grid.locator('button.ss-gridfield-add-group-modal-btn').click();
+    const dialog = page.locator('.ui-dialog:has(.ss-gridfield-add-group-dialog)');
+    const input = dialog.locator('input.ss-gridfield-new-group-name');
+    await input.fill('Delta');
+    const posted = waitForGridPost(page, 'group_create');
+    await input.press('Enter');
+
+    // Mid-request: Escape does not close it, and its X is disabled.
+    await page.waitForTimeout(300);
+    // The input is disabled for the request, so focus has left it: Escape is pressed with the dialog
+    // itself focused (tabindex -1, as after a click on its chrome), where jQuery UI listens for it.
+    await dialog.focus();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(100);
+    expect(await dialog.count(), 'Escape mid-request leaves the dialog open').toBe(1);
+    await expect(dialog.locator('.ui-dialog-titlebar-close')).toBeDisabled();
+
+    await expectJsonSuccess(await posted);
+    await expect(divider(grid, 'Delta')).toBeVisible();
+    await expect(dialog).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { jQuery: { active: number } }).jQuery.active), 'no request left open').toBe(0);
+
+    // The next open gets a fresh dialog, with Escape and its X working again.
+    await grid.locator('button.ss-gridfield-add-group-modal-btn').click();
+    await expect(dialog.locator('.ui-dialog-titlebar-close')).toBeEnabled();
+    await dialog.locator('input.ss-gridfield-new-group-name').press('Escape');
+    await expect(dialog).toHaveCount(0);
+});
+
+// After a create the grid is re-rendered; focus used to fall to <body>. It goes back to the
+// add-group button of the new grid, so the keyboard user can carry on from where they were.
+for (const setup of ['immediate', 'modal'] as const) {
+    test(`after a create, focus returns to the add-group button (${setup === 'modal' ? 'dialog' : 'inline input'})`, async ({ page }) => {
+        const { grid } = await freshSource(page, 'do', `DO focus ${setup}`, setup);
+        let input = grid.locator('input.ss-gridfield-new-group-name');
+        let button = grid.locator('button.ss-gridfield-create-group-btn');
+        if (setup === 'modal') {
+            button = grid.locator('button.ss-gridfield-add-group-modal-btn');
+            await button.click();
+            input = page.locator('.ui-dialog input.ss-gridfield-new-group-name');
+        }
+        await input.fill('Delta');
+        const posted = waitForGridPost(page, 'group_create');
+        await input.press('Enter');
+        await expectJsonSuccess(await posted);
+        await expect(divider(grid, 'Delta')).toBeVisible();
+        await expect(page.locator('.ui-dialog')).toHaveCount(0);
+        await expect(button).toBeFocused();
+    });
+}

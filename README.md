@@ -155,12 +155,15 @@ $groupable->setGroupCreateHandler(function ($gridField, $sourceRecord, $groupDat
 - **Inline input** (default): a name input with the button joined to it, in the GridField's toolbar.
   Enter in the input also creates the group.
 - **Dialog** (`->setInlineInput(false)`): only the button shows in the toolbar; it opens a small dialog
-  with the name input and Create / Cancel buttons (Enter creates, Escape cancels). The dialog is a
+  with the name input and Create / Cancel buttons (Enter creates, Escape cancels). While the create
+  request runs, the dialog cannot be closed (its buttons, X and Escape are off); it closes itself
+  once the group exists. The dialog is a
   jQuery UI dialog, the one dialog the CMS still ships for non-React admin code on both Silverstripe 5
   and 6, so it needs no extra library. The dialog's markup lives in `GFAddNewDataObjectGroupButton.ss`
   (hidden `.ss-gridfield-add-group-dialog`).
 
-Both create the group through the same endpoint, so `setGroupCreateHandler()` applies to either. Other
+Both create the group through the same endpoint, so `setGroupCreateHandler()` applies to either.
+After a create the GridField is re-rendered and focus returns to its add-group button. Other
 options: `setButtonTitle()` (also the dialog's title) and `setPlaceholder()`.
 
 ### Group Deletion
