@@ -304,11 +304,174 @@ test('deferred saving (OrderableRows immediate update off): a drag marks the for
     expect(after.map(([name, items]) => [name, [...items].sort()])).toEqual([['Alpha', ['A2']], ['Beta', ['A1', 'B1']], ['Gamma', []], ['No section', ['U1']]]);
 });
 
-// Known bug, kept visible: the non-inline add-group button targets a modal that is never rendered,
-// so it does nothing.
-test.fixme('without the inline input, "Add Group" opens a dialog to name the group (https://github.com/restruct/silverstripe-groupablegridfield/issues/14)', async ({ page }) => {
-    const { grid } = await freshSource(page, 'do', 'DO modal', 'modal');
-    await expect(grid.locator('input.ss-gridfield-new-group-name')).toHaveCount(0);
-    await grid.locator('button.ss-gridfield-add-group-modal-btn').click();
-    await expect(page.locator('.modal.show')).toBeVisible();
+// Regression (#14): the non-inline add-group button targeted a Bootstrap modal that was never
+// rendered, and neither CMS loads Bootstrap's modal JS, so it did nothing. It now opens a jQuery UI
+// dialog (the dialog both CMS majors still ship for non-React code) that names and creates the group
+// through the same endpoint as the inline input.
+test('without the inline input, "Add Group" opens a dialog to name the group (https://github.com/restruct/silverstripe-groupablegridfield/issues/14)', async ({ page }) => {
+    const { id, grid } = await freshSource(page, 'do', 'DO modal', 'modal');
+    // No visible inline input: the only name input in the grid is the dialog's hidden template.
+    await expect(grid.locator('input.ss-gridfield-new-group-name')).toBeHidden();
+    const openButton = grid.locator('button.ss-gridfield-add-group-modal-btn');
+    const dialog = page.locator('.ui-dialog:has(.ss-gridfield-add-group-dialog)');
+
+    // Cancel closes the dialog without a request, and removes it again.
+    let requests = 0;
+    page.on('request', (r) => r.url().includes('/group_create') && requests++);
+    await openButton.click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('.ui-dialog-title')).toHaveText('Add Group');
+    const input = dialog.locator('input.ss-gridfield-new-group-name');
+    await expect(input).toBeFocused();
+    await expect(input).toHaveAttribute('placeholder', 'New group name...');
+    // The title sits in its own bar above the input. The admin's legacy dialog styles position it
+    // absolutely, which on Silverstripe 5 put it under the input (client/css/groupable.css).
+    const t = await dialog.locator('.ui-dialog-title').boundingBox();
+    const i = await input.boundingBox();
+    expect(t && i, 'title and input are rendered').toBeTruthy();
+    expect(t!.y + t!.height, 'the title ends above the input').toBeLessThanOrEqual(i!.y);
+    await dialog.locator('button.ss-gridfield-add-group-dialog-cancel').click();
+    await expect(dialog).toHaveCount(0);
+    // Escape does the same.
+    await openButton.click();
+    await expect(input).toBeFocused();
+    await input.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    expect(requests, 'cancel and Escape send nothing').toBe(0);
+
+    // An empty name sends nothing and keeps the dialog open.
+    await openButton.click();
+    await dialog.locator('button.ss-gridfield-add-group-dialog-create').click();
+    await expect(dialog).toBeVisible();
+    expect(requests, 'no create request for an empty name').toBe(0);
+
+    // With the dialog's button: the section is created, the grid re-rendered, the dialog gone.
+    await input.fill('Delta');
+    let posted = waitForGridPost(page, 'group_create');
+    await dialog.locator('button.ss-gridfield-add-group-dialog-create').click();
+    let json = await expectJsonSuccess(await posted);
+    expect((json.group as { name: string }).name).toBe('Delta');
+    await expect(divider(grid, 'Delta')).toBeVisible();
+    await expect(dialog).toHaveCount(0);
+
+    // With Enter, from the button of the re-rendered grid.
+    await openButton.click();
+    await expect(dialog).toBeVisible();
+    await dialog.locator('input.ss-gridfield-new-group-name').fill('Epsilon');
+    posted = waitForGridPost(page, 'group_create');
+    await dialog.locator('input.ss-gridfield-new-group-name').press('Enter');
+    json = await expectJsonSuccess(await posted);
+    await expect(divider(grid, 'Epsilon')).toBeVisible();
+    await expect(dialog).toHaveCount(0);
+
+    const expected = [...SEEDED.slice(0, 3), ['Delta', []], ['Epsilon', []], SEEDED[3]];
+    expect(await layout(grid)).toEqual(expected);
+    expect(await layout(await openSource(page, 'do', id))).toEqual(expected);
 });
+
+// Regression: a second Enter while the create request was still running sent a second request and
+// created the group twice, in both the inline input and the dialog. The request is slowed down here
+// so the second Enter lands while the first is in flight.
+for (const setup of ['immediate', 'modal'] as const) {
+    test(`a double Enter creates the group once (${setup === 'modal' ? 'dialog' : 'inline input'})`, async ({ page }) => {
+        const { id, grid } = await freshSource(page, 'do', `DO double enter ${setup}`, setup);
+        await page.route('**/group_create', async (route) => {
+            await new Promise((r) => setTimeout(r, 1200));
+            await route.continue();
+        });
+        let requests = 0;
+        page.on('request', (r) => r.url().includes('/group_create') && requests++);
+
+        let input = grid.locator('input.ss-gridfield-new-group-name');
+        if (setup === 'modal') {
+            await grid.locator('button.ss-gridfield-add-group-modal-btn').click();
+            input = page.locator('.ui-dialog input.ss-gridfield-new-group-name');
+            await expect(input).toBeFocused();
+        }
+        await input.fill('Delta');
+        const posted = waitForGridPost(page, 'group_create');
+        await input.press('Enter');
+        // The second Enter goes straight to the input's handlers (keydown for the dialog, keypress
+        // for the inline input): whether a real key event still reaches an input that was just
+        // disabled depends on focus timing, which made a plain second press flaky as a regression.
+        await input.evaluate((el) => {
+            const $ = (window as unknown as { jQuery: (e: Element) => { trigger: (ev: unknown) => void } }).jQuery;
+            const jq = (window as unknown as { jQuery: { Event: (type: string, props: object) => unknown } }).jQuery;
+            $(el).trigger(jq.Event('keydown', { which: 13, keyCode: 13 }));
+            $(el).trigger(jq.Event('keypress', { which: 13, keyCode: 13 }));
+        });
+        await expectJsonSuccess(await posted);
+        await expect(divider(grid, 'Delta')).toBeVisible();
+        // give a second request, had one been sent, time to arrive and re-render the grid
+        await page.waitForTimeout(1600);
+
+        expect(requests, 'one create request').toBe(1);
+        const expected = [...SEEDED.slice(0, 3), ['Delta', []], SEEDED[3]];
+        expect(await layout(grid)).toEqual(expected);
+        expect(await layout(await openSource(page, 'do', id))).toEqual(expected);
+    });
+}
+
+// Regression: closing the dialog (Escape, its X) while the create request was running destroyed the
+// widget, and the request's success handler then called dialog('close') on it and threw. jQuery
+// 3.7 does not catch a throwing callback, so jQuery.active stayed at 1 for good, while the group
+// was still created. The dialog now stays open, Escape and its X disabled, until the request is done.
+test('the add-group dialog cannot be closed while its create request runs', async ({ page }) => {
+    // No uncaught error: the auto 'guard' fixture (support.ts) fails the spec on any, which is
+    // how the old dialog('close') throw shows up here.
+    const { grid } = await freshSource(page, 'do', 'DO dialog in flight', 'modal');
+    await page.route('**/group_create', async (route) => {
+        await new Promise((r) => setTimeout(r, 1200));
+        await route.continue();
+    });
+
+    await grid.locator('button.ss-gridfield-add-group-modal-btn').click();
+    const dialog = page.locator('.ui-dialog:has(.ss-gridfield-add-group-dialog)');
+    const input = dialog.locator('input.ss-gridfield-new-group-name');
+    await input.fill('Delta');
+    const posted = waitForGridPost(page, 'group_create');
+    await input.press('Enter');
+
+    // Mid-request: Escape does not close it, and its X is disabled.
+    await page.waitForTimeout(300);
+    // The input is disabled for the request, so focus has left it: Escape is pressed with the dialog
+    // itself focused (tabindex -1, as after a click on its chrome), where jQuery UI listens for it.
+    await dialog.focus();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(100);
+    expect(await dialog.count(), 'Escape mid-request leaves the dialog open').toBe(1);
+    await expect(dialog.locator('.ui-dialog-titlebar-close')).toBeDisabled();
+
+    await expectJsonSuccess(await posted);
+    await expect(divider(grid, 'Delta')).toBeVisible();
+    await expect(dialog).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { jQuery: { active: number } }).jQuery.active), 'no request left open').toBe(0);
+
+    // The next open gets a fresh dialog, with Escape and its X working again.
+    await grid.locator('button.ss-gridfield-add-group-modal-btn').click();
+    await expect(dialog.locator('.ui-dialog-titlebar-close')).toBeEnabled();
+    await dialog.locator('input.ss-gridfield-new-group-name').press('Escape');
+    await expect(dialog).toHaveCount(0);
+});
+
+// After a create the grid is re-rendered; focus used to fall to <body>. It goes back to the
+// add-group button of the new grid, so the keyboard user can carry on from where they were.
+for (const setup of ['immediate', 'modal'] as const) {
+    test(`after a create, focus returns to the add-group button (${setup === 'modal' ? 'dialog' : 'inline input'})`, async ({ page }) => {
+        const { grid } = await freshSource(page, 'do', `DO focus ${setup}`, setup);
+        let input = grid.locator('input.ss-gridfield-new-group-name');
+        let button = grid.locator('button.ss-gridfield-create-group-btn');
+        if (setup === 'modal') {
+            button = grid.locator('button.ss-gridfield-add-group-modal-btn');
+            await button.click();
+            input = page.locator('.ui-dialog input.ss-gridfield-new-group-name');
+        }
+        await input.fill('Delta');
+        const posted = waitForGridPost(page, 'group_create');
+        await input.press('Enter');
+        await expectJsonSuccess(await posted);
+        await expect(divider(grid, 'Delta')).toBeVisible();
+        await expect(page.locator('.ui-dialog')).toHaveCount(0);
+        await expect(button).toBeFocused();
+    });
+}

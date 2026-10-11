@@ -1,5 +1,34 @@
 # Changelog
 
+## 4.1.0 (2026-10-11)
+
+### Fixed
+
+- `GridFieldAddNewDataObjectGroupButton::setInlineInput(false)` did nothing: its button pointed
+  Bootstrap's modal data-api at `#add-group-modal-{GridFieldID}`, which nothing rendered, and neither
+  CMS loads Bootstrap's modal JavaScript. The button now opens a dialog to name the group, with Create
+  and Cancel buttons (Enter creates, Escape cancels), and creates it through the same endpoint and
+  `createGroup()` as the inline input. The dialog is jQuery UI's, which both the Silverstripe 5 and 6
+  admin still bundle for non-React code; the module renders its markup (hidden, in
+  `GFAddNewDataObjectGroupButton.ss`) and opens it from `client/js/groupable.js`. While the create
+  request runs the dialog cannot be closed (buttons, X and Escape are off), and it closes itself once
+  the group exists. This closes the second half of #14.
+- `GridFieldAddNewDataObjectGroupButton`: after a group was created the re-rendered GridField left
+  focus on the page body. It now returns to the grid's add-group button, inline input or dialog.
+- `GridFieldAddNewDataObjectGroupButton`: a second Enter (or a held one) while the create request was
+  still running sent another request and created the group twice, from the inline input as well as
+  from the dialog. `createGroup()` now does nothing while its input is disabled for a running request.
+
+### Changed
+
+- Custom copies of `GFAddNewDataObjectGroupButton.ss`: the non-inline branch no longer carries the
+  `data-toggle` / `data-bs-toggle` / `data-target` / `data-bs-target` attributes, and gains the hidden
+  `.ss-gridfield-add-group-dialog` markup the script opens. A copy that keeps the old branch renders a
+  button that still does nothing.
+- `createGroup()` (entwine, on `.ss-gridfield-add-new-do-group`) takes an optional input to read the
+  name from and returns the request (or `false` when nothing was sent), so the dialog can close
+  itself once the group exists.
+
 ## 4.0.1 (2026-10-08)
 
 ### Fixed

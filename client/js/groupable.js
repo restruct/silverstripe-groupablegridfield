@@ -540,11 +540,25 @@
 
             /**
              * Create a new DataObject group via AJAX
+             *
+             * @param {jQuery} [input] the name input to read; defaults to the inline input. The
+             *   add-group dialog passes its own input, which jQuery UI has moved out of this wrapper.
+             * @return {jqXHR|false} the request, so a caller can act on its outcome (the dialog
+             *   closes itself on success), or false when nothing was sent
              */
-            createGroup: function() {
+            createGroup: function(input) {
                 var self = this;
                 var grid = this.getGridField();
-                var input = this.find('.ss-gridfield-new-group-name');
+                // the grid is replaced on success; its id is how the new one is found again
+                var gridId = grid.attr('id');
+                input = input || this.find('.ss-gridfield-new-group-name');
+
+                // A request is already running for this input (it is disabled until that completes):
+                // a second Enter, or a held one, would otherwise create the group twice
+                if (input.prop('disabled')) {
+                    return false;
+                }
+
                 var groupName = input.val().trim();
 
                 if (!groupName) {
@@ -565,7 +579,7 @@
                 input.prop('disabled', true);
 
                 // Post to create endpoint
-                $.ajax({
+                return $.ajax({
                     url: createUrl,
                     type: 'POST',
                     data: {
@@ -581,6 +595,9 @@
                             // Reload GridField with new content
                             if (response.html) {
                                 grid.replaceWith(response.html);
+                                // focus went down with the old grid (to <body>): put it back on the
+                                // add-group button, so a keyboard user carries on where they were
+                                self.focusAddGroupButton(gridId);
                             } else {
                                 // Fallback: full reload
                                 grid.reload();
@@ -599,7 +616,124 @@
                         input.prop('disabled', false);
                     }
                 });
+            },
 
+            /**
+             * Focus the add-group button (inline or dialog variant) of the grid with this id: after a
+             * create the grid, and this button with it, has been replaced.
+             *
+             * @param {string} gridId
+             */
+            focusAddGroupButton: function(gridId) {
+                $('#' + gridId)
+                    .find('.ss-gridfield-create-group-btn, .ss-gridfield-add-group-modal-btn')
+                    .first()
+                    .trigger('focus');
+            },
+
+            /**
+             * Open the add-group dialog (non-inline variant, setInlineInput(false), #14).
+             *
+             * Uses jQuery UI's dialog: both CMS majors (admin 2 on Silverstripe 5, admin 3 on
+             * Silverstripe 6) still bundle jQuery UI 1.13 on the global jQuery and style .ui-dialog,
+             * while neither loads Bootstrap's modal JS. Each open works on a fresh copy of the hidden
+             * template markup, destroyed again on close: jQuery UI moves the dialog to <body>, and the
+             * GridField (and this wrapper with it) is replaced after a create, so a dialog kept between
+             * opens would outlive the grid it belongs to.
+             */
+            openGroupDialog: function() {
+                var self = this;
+                var template = this.find('.ss-gridfield-add-group-dialog').first();
+
+                if (typeof $.fn.dialog !== 'function') {
+                    console.error('GridFieldAddNewDataObjectGroupButton: jQuery UI dialog is not loaded');
+                    return false;
+                }
+
+                var dialog = template.clone().removeAttr('hidden');
+                var input = dialog.find('.ss-gridfield-new-group-name');
+                var buttons = dialog.find('button');
+
+                var gridId = this.getGridField().attr('id');
+
+                var submit = function() {
+                    // a request is already running (createGroup disables the input for its duration)
+                    if (input.prop('disabled')) {
+                        return;
+                    }
+                    var request = self.createGroup(input);
+                    if (!request) {
+                        return;
+                    }
+                    // While the request runs the dialog cannot be closed (Escape, its X): its success
+                    // handler closes it, and closing it first used to leave that handler calling
+                    // close on a destroyed widget, which threw and left jQuery.active stuck at 1.
+                    // createGroup re-enables the input itself; the dialog's own buttons are ours.
+                    var closeButton = dialog.dialog('widget').find('.ui-dialog-titlebar-close');
+                    buttons.prop('disabled', true);
+                    closeButton.prop('disabled', true);
+                    dialog.dialog('option', 'closeOnEscape', false);
+                    request
+                        .done(function(response) {
+                            if (response && response.success && dialog.dialog('instance') && dialog.dialog('isOpen')) {
+                                dialog.dialog('close');
+                                // jQuery UI's close hands focus back to the button that opened the
+                                // dialog, which went with the old grid, and so blurs to <body>:
+                                // focus the new grid's button again once the dialog is gone
+                                self.focusAddGroupButton(gridId);
+                            }
+                        })
+                        .always(function() {
+                            buttons.prop('disabled', false);
+                            closeButton.prop('disabled', false);
+                            if (dialog.dialog('instance')) {
+                                dialog.dialog('option', 'closeOnEscape', true);
+                            }
+                        });
+                };
+
+                dialog.on('click', '.ss-gridfield-add-group-dialog-create', function(e) {
+                    e.preventDefault();
+                    submit();
+                });
+                dialog.on('click', '.ss-gridfield-add-group-dialog-cancel', function(e) {
+                    e.preventDefault();
+                    dialog.dialog('close');
+                });
+                // Enter creates; the inline input's entwine keypress handler does not reach here,
+                // as the dialog lives outside .ss-gridfield
+                input.on('keydown', function(e) {
+                    if (e.which === 13) {
+                        e.preventDefault();
+                        submit();
+                    }
+                });
+
+                dialog.dialog({
+                    modal: true,
+                    width: 420,
+                    // a hook for client/css/groupable.css; jQuery UI merges this per key with the classes
+                    // the Silverstripe 6 admin maps onto every dialog (modal-header, modal-title), but a
+                    // key given here replaces that key's default, so ui-corner-all is repeated
+                    classes: { 'ui-dialog': 'ui-corner-all ss-gridfield-add-group-ui-dialog' },
+                    resizable: false,
+                    // the copy is single-use: remove it with its jQuery UI wrapper and overlay
+                    close: function() {
+                        dialog.dialog('destroy').remove();
+                    },
+                    open: function() {
+                        input.trigger('focus');
+                    }
+                });
+
+                return false;
+            }
+        });
+
+        // Non-inline add-group button: open the dialog (#14)
+        $(".ss-gridfield .ss-gridfield-add-group-modal-btn").entwine({
+            onclick: function() {
+                this.closest('.ss-gridfield-add-new-do-group').openGroupDialog();
                 return false;
             }
         });

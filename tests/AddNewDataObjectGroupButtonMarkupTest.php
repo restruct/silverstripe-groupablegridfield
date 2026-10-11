@@ -42,7 +42,7 @@ class AddNewDataObjectGroupButtonMarkupTest extends SapphireTest
         parent::tearDown();
     }
 
-    private function renderButton(): string
+    private function renderButton(bool $inline = true): string
     {
         $request = new HTTPRequest('GET', '/');
         $request->setSession(new Session([]));
@@ -62,7 +62,7 @@ class AddNewDataObjectGroupButtonMarkupTest extends SapphireTest
                 ->setGroupTitleField('Name')
                 ->setGroupSortField('Sort')
         );
-        $button = GridFieldAddNewDataObjectGroupButton::create();
+        $button = GridFieldAddNewDataObjectGroupButton::create()->setInlineInput($inline);
         $config->addComponent($button);
 
         $grid = GridField::create('Items', 'Items', $Source->Items(), $config);
@@ -95,5 +95,33 @@ class AddNewDataObjectGroupButtonMarkupTest extends SapphireTest
                 'Bootstrap 4 (SS5 CMS) needs the button inside .input-group-append'
             );
         }
+    }
+
+    /**
+     * Issue #14 (dialog half): without the inline input, the button pointed Bootstrap's modal
+     * data-api at #add-group-modal-{id}, which nothing rendered and neither CMS loads. The
+     * template now renders the dialog's markup itself (hidden), for client/js/groupable.js to
+     * open as a jQuery UI dialog. Whether it opens is the browser suite's job; this pins the markup
+     * the script depends on.
+     */
+    public function testNonInlineButtonRendersItsOwnDialogMarkup(): void
+    {
+        $html = $this->renderButton(false);
+
+        $this->assertStringContainsString('ss-gridfield-add-group-modal-btn', $html);
+        $this->assertStringNotContainsString('ss-gridfield-create-group-btn', $html, 'no inline input group');
+        # Bootstrap's modal data-api is not loaded by either CMS, so these attributes open nothing
+        $noDataApi = 'no Bootstrap modal data-api: neither CMS loads it';
+        $this->assertStringNotContainsString('data-bs-toggle="modal"', $html, $noDataApi);
+        $this->assertStringNotContainsString('data-toggle="modal"', $html, $noDataApi);
+
+        $this->assertMatchesRegularExpression(
+            '#<div class="ss-gridfield-add-group-dialog" title="Add Group" hidden>.*?'
+            . 'class="form-control ss-gridfield-new-group-name".*?'
+            . 'class="btn btn-primary ss-gridfield-add-group-dialog-create".*?'
+            . 'class="btn btn-outline-secondary ss-gridfield-add-group-dialog-cancel"#s',
+            $html,
+            'the hidden dialog template holds the name input and its create and cancel buttons'
+        );
     }
 }
