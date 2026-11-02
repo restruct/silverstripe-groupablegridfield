@@ -176,7 +176,7 @@ class GridFieldGroupable
      * Array format: [
      *   'action_name' => [
      *     'icon' => 'font-icon-sync',
-     *     'title' => 'Sync to FUSE',
+     *     'title' => 'Sync to external system',
      *     'handler' => Closure,
      *   ],
      * ]
@@ -487,7 +487,7 @@ class GridFieldGroupable
     /**
      * Add an action button to group rows (DataObject mode only).
      *
-     * Inspired by GridFieldSaveToFuseButton closure pattern.
+     * Inspired by the closure pattern of a save-to-external-API GridField button in a client project.
      *
      * NB parameter order is ($name, $title, $icon) and the handler receives
      * ($gridField, $sourceRecord, $group, $actionData) — as documented in the README since the
@@ -923,7 +923,7 @@ class GridFieldGroupable
     /**
      * Handle group creation request (DataObject mode only).
      *
-     * Supports custom creation handlers for complex scenarios (e.g., FUSE API calls).
+     * Supports custom creation handlers for complex scenarios (e.g., calls to an external API).
      * Falls back to default DataObject creation if no handler is set.
      *
      * @param GridField $grid
@@ -971,7 +971,7 @@ class GridFieldGroupable
 
         try {
             if ($this->groupCreateHandler) {
-                // Use custom handler (for complex creation like FUSE API calls)
+                // Use custom handler (for complex creation like external API calls)
                 $handler = $this->groupCreateHandler;
                 $result = $handler($grid, $record, $groupData);
 
@@ -1443,7 +1443,7 @@ class GridFieldGroupable
      * Handle group title update request (DataObject mode only).
      *
      * Updates the title field on the group DataObject.
-     * Supports custom handler for additional logic (e.g., FUSE sync).
+     * Supports custom handler for additional logic (e.g., syncing to an external system).
      *
      * @param GridField $grid
      * @param HTTPRequest $request
@@ -1513,7 +1513,7 @@ class GridFieldGroupable
             $this->extend('onBeforeGroupTitleUpdate', $grid, $group, $newTitle, $record);
 
             if ($this->groupTitleUpdateHandler) {
-                // Use custom handler (for complex updates like FUSE sync)
+                // Use custom handler (for complex updates like syncing to an external system)
                 $handler = $this->groupTitleUpdateHandler;
                 $result = $handler($grid, $record, $group, $newTitle);
 
