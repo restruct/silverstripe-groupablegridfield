@@ -1,12 +1,15 @@
 {
     "name": "restruct/silverstripe-groupable-gridfield",
-    "description": "Drag & drop grouping of items in a Silverstripe GridField, with groups from a MultiValueField or from a DataObject relation",
+    "description": "Drag and drop grouping for Silverstripe GridFields: drag items between groups, reorder whole groups, and add, rename or remove groups in the grid, with groups from a MultiValueField or a DataObject relation",
     "type": "silverstripe-vendormodule",
     "keywords": [
         "silverstripe",
+        "silverstripe-module",
+        "silverstripe-cms",
         "gridfield",
         "grouping",
-        "sortable"
+        "sortable",
+        "drag-and-drop"
     ],
     "license": "MIT",
     "authors": [
