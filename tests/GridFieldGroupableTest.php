@@ -19,9 +19,9 @@ use Symbiote\GridFieldExtensions\GridFieldOrderableRows;
  * Class GridFieldGroupableTest
  *
  * Covers both modes against consumer-shaped fixtures:
- * - MultiValue (legacy) mode: FUSE-shaped — groups in a MultiValueField on the source,
+ * - MultiValue (legacy) mode: shaped like a client project's document collections: groups in a MultiValueField on the source,
  *   membership in a many_many_extraFields column
- * - DataObject mode: ELP-shaped — groups are DataObjects, membership is an FK on the item
+ * - DataObject mode: shaped like another client project: groups are DataObjects, membership is an FK on the item
  */
 class GridFieldGroupableTest extends SapphireTest
 {
@@ -92,7 +92,7 @@ class GridFieldGroupableTest extends SapphireTest
     // ========================================
 
     /**
-     * FUSE-shaped legacy source: groups sec_a/sec_b in the Sections MultiValueField,
+     * Legacy source shaped like a client project's document collection: groups sec_a/sec_b in the Sections MultiValueField,
      * two items assigned to sec_a via the many_many extra field.
      *
      * @return array [GroupableLegacySource, GroupableLegacyItem, GroupableLegacyItem]
@@ -137,7 +137,7 @@ class GridFieldGroupableTest extends SapphireTest
     }
 
     /**
-     * ELP-shaped DataObject-mode source: two Section records, two items assigned to the first.
+     * DataObject-mode source shaped like another client project: two Section records, two items assigned to the first.
      *
      * @return array [GroupableDOSource, GroupableSection, GroupableSection, GroupableDOItem, GroupableDOItem]
      */
