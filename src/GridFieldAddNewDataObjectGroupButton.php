@@ -12,7 +12,7 @@ use SilverStripe\View\ArrayData;
  *
  * Unlike GridFieldAddNewGroupButton (for MultiValueField mode), this component:
  * - Works with DataObject groups via the handleGroupCreate endpoint
- * - Supports custom creation handlers (e.g., FUSE API calls)
+ * - Supports custom creation handlers (e.g., calls to an external API)
  * - Creates groups via AJAX and updates the GridField
  *
  * Usage:

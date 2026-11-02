@@ -6,7 +6,7 @@ use SilverStripe\Dev\TestOnly;
 use SilverStripe\ORM\DataObject;
 
 /**
- * Item fixture for MultiValue (legacy) mode tests — mirrors FUSE's DocSys documents:
+ * Item fixture for MultiValue (legacy) mode tests: mirrors a client project's documents:
  * group membership lives in a many_many_extraFields column on the join table (see GroupableLegacySource).
  */
 class GroupableLegacyItem extends DataObject implements TestOnly

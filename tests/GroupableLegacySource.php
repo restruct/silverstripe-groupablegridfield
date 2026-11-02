@@ -7,7 +7,7 @@ use SilverStripe\ORM\DataObject;
 use Symbiote\MultiValueField\ORM\FieldType\MultiValueField;
 
 /**
- * Source fixture for MultiValue (legacy) mode tests — mirrors FUSE's DocSys_DocumentCollection:
+ * Source fixture for MultiValue (legacy) mode tests: mirrors a client project's document collection model:
  * groups are key→name pairs in a MultiValueField ('Sections'), items are a many_many whose group
  * key lives in a many_many_extraFields column ('Section').
  */
