@@ -1,5 +1,15 @@
 (function($) {
 
+    // The CSRF token of the form the grid sits in (its SecurityID field), as request headers.
+    // Every group endpoint checks it (GridFieldGroupable::checkSecurityToken(), #18). It goes in
+    // the X-SecurityID header, which SecurityToken::checkRequest() reads before the request vars,
+    // so it also reaches the title update, whose body is JSON rather than form data. A grid
+    // outside a form, or a form without a token, sends no header and the server decides.
+    function securityHeaders(grid) {
+        var token = $(grid).closest('form').find('input[name="SecurityID"]').first().val();
+        return token ? { 'X-SecurityID': token } : {};
+    }
+
     $.entwine("ss", function($) {
 
         /**
@@ -226,6 +236,7 @@
                             $.ajax({
                                 url: reorderUrl,
                                 type: 'POST',
+                                headers: securityHeaders(grid),
                                 data: { 'group_order': groupOrder },
                                 dataType: 'json',
                                 success: function(response) {
@@ -582,6 +593,7 @@
                 return $.ajax({
                     url: createUrl,
                     type: 'POST',
+                    headers: securityHeaders(grid),
                     data: {
                         group_name: groupName,
                         group_title: groupName
@@ -789,6 +801,7 @@
                 $.ajax({
                     url: url,
                     type: 'POST',
+                    headers: securityHeaders(grid),
                     dataType: 'json',
                     success: function(response) {
                         if (response.success) {
@@ -875,6 +888,7 @@
                 $.ajax({
                     url: url,
                     type: 'POST',
+                    headers: securityHeaders(grid),
                     dataType: 'json',
                     success: function(response) {
                         if (response.success) {
@@ -1007,6 +1021,7 @@
                 $.ajax({
                     url: url,
                     type: 'POST',
+                    headers: securityHeaders(grid),
                     contentType: 'application/json',
                     data: JSON.stringify({ title: newTitle }),
                     dataType: 'json',
