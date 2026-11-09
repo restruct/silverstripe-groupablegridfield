@@ -3,7 +3,7 @@
 The `v2` line (Silverstripe 4 and 5). Releases before 2.4.3 are described in their tags and
 commits; `main` (4.x) has its own CHANGELOG.
 
-## 2.4.3 (unreleased)
+## 2.4.3 (2026-11-09)
 
 ### Security
 
