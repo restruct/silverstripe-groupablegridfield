@@ -301,6 +301,8 @@ class GridFieldGroupableTest extends SapphireTest
                 ],
             ],
         ]);
+        # with the form's CSRF token in the header groupable.js sends it in (#18)
+        $request->addHeader('X-SecurityID', $grid->getForm()->getSecurityToken()->getValue());
 
         # Pre-fix this fataled: direct access to GridFieldOrderableRows::$immediateUpdate (protected)
         $groupable->handleGroupAssignment($grid, $request);
@@ -327,6 +329,8 @@ class GridFieldGroupableTest extends SapphireTest
                 ],
             ],
         ]);
+        # with the form's CSRF token in the header groupable.js sends it in (#18)
+        $request->addHeader('X-SecurityID', $grid->getForm()->getSecurityToken()->getValue());
 
         $groupable->handleGroupAssignment($grid, $request);
 
@@ -350,6 +354,8 @@ class GridFieldGroupableTest extends SapphireTest
             'groupable_item_id' => (string) $ItemA->ID,
             'groupable_group_key' => 'none',
         ]);
+        # with the form's CSRF token in the header groupable.js sends it in (#18)
+        $request->addHeader('X-SecurityID', $grid->getForm()->getSecurityToken()->getValue());
 
         $groupable->handleGroupAssignment($grid, $request);
 
@@ -369,6 +375,8 @@ class GridFieldGroupableTest extends SapphireTest
             'groupable_item_id' => (string) $ItemA->ID,
             'groupable_group_key' => 'none',
         ]);
+        # with the form's CSRF token in the header groupable.js sends it in (#18)
+        $request->addHeader('X-SecurityID', $grid->getForm()->getSecurityToken()->getValue());
 
         $groupable->handleGroupAssignment($grid, $request);
 
@@ -469,6 +477,8 @@ class GridFieldGroupableTest extends SapphireTest
         $this->assertSame('Do Test', $groupable->getGroupActions()['test_act']['title']);
 
         $request = new HTTPRequest('POST', 'group_action', [], []);
+        # with the form's CSRF token in the header groupable.js sends it in (#18)
+        $request->addHeader('X-SecurityID', $grid->getForm()->getSecurityToken()->getValue());
         $request->setRouteParams(['GroupID' => (string) $SectionOne->ID, 'ActionName' => 'test_act']);
 
         $response = json_decode($groupable->handleGroupAction($grid, $request), true);
@@ -492,6 +502,8 @@ class GridFieldGroupableTest extends SapphireTest
         [$grid, $groupable] = $this->buildDataObjectGrid($Source, immediate: true);
 
         $request = new HTTPRequest('POST', 'group_delete', [], []);
+        # with the form's CSRF token in the header groupable.js sends it in (#18)
+        $request->addHeader('X-SecurityID', $grid->getForm()->getSecurityToken()->getValue());
         $request->setRouteParams(['GroupID' => (string) $SectionOne->ID]);
 
         $response = json_decode($groupable->handleGroupDelete($grid, $request), true);
