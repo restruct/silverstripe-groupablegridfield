@@ -14,6 +14,15 @@
   `client/js/groupable.js` sends the token in the `X-SecurityID` header with every group request;
   drags already sent it with the form data.
 
+### Removed
+
+- `client/css/groupable.scss` and `client/css/groupable.css.map` (#19). `groupable.css` is the
+  stylesheet the module loads and has been edited directly since 2026-02; the SCSS still held the
+  2025 rules only, so compiling it would have dropped the DataObject-mode styles (titles, actions,
+  metadata, the add-group dialog). The map pointed at that old build and the CSS no longer
+  referenced it. Nothing in the module compiled either file. The one rule the SCSS had disabled
+  (`background-color: #dae2e7` on divider cells) is kept as a comment in the CSS.
+
 ### Changed
 
 - Code of your own that posts to a group endpoint (a custom script, or a copy of
