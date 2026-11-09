@@ -29,6 +29,7 @@ use SilverStripe\ORM\ManyManyThroughList;
 # Error that the handlers' catch (Exception) does not catch. Relation is kept for the docblocks.
 //use SilverStripe\ORM\SS_List;
 use SilverStripe\ORM\Relation;
+use SilverStripe\Security\SecurityToken;
 # ArrayData is NOT imported: it moved namespace in Silverstripe 6 (View\ArrayData -> Model\ArrayData)
 # with no alias left behind, so it is resolved per major in create_array_data() below
 //use SilverStripe\View\ArrayData;
@@ -733,6 +734,35 @@ class GridFieldGroupable
     }
 
     /**
+     * Refuse a request to one of the group endpoints that does not carry the CSRF token of the
+     * form the grid is in (#18), the way GridField::gridFieldAlterAction() does for core's own
+     * GridField actions: 400 with core's CSRF message.
+     *
+     * Every endpoint in getURLHandlers() changes data, and before this check only canEdit() and
+     * the session cookie's SameSite=Lax stood between a cross-site POST and a write. The token is
+     * read by SecurityToken::checkRequest(): the X-SecurityID header first (sent by groupable.js),
+     * then the SecurityID request var (sent by a GridField reload, which posts the whole form).
+     * The form's own token is used, so a form with its token disabled (NullSecurityToken) passes,
+     * as it does for core; a grid without a form falls back to the global token.
+     *
+     * @param GridField $grid
+     * @param HTTPRequest $request
+     * @return void
+     */
+    protected function checkSecurityToken($grid, $request)
+    {
+        $form = $grid->getForm();
+        $token = $form ? $form->getSecurityToken() : SecurityToken::inst();
+        if (!$token->checkRequest($request)) {
+            $this->httpError(400, _t(
+                'SilverStripe\\Forms\\Form.CSRF_FAILED_MESSAGE',
+                'There seems to have been a technical problem. Please click the back button, '
+                . 'refresh your browser, and try again.'
+            ));
+        }
+    }
+
+    /**
      * @param GridField $field
      */
     public function getHTMLFragments($grid)
@@ -870,6 +900,9 @@ class GridFieldGroupable
      */
     public function handleGroupAssignment($grid, $request)
     {
+        # CSRF: checked before anything else, so a forged request learns nothing (#18)
+        $this->checkSecurityToken($grid, $request);
+
         $list = $grid->getList();
 
         // (copied from GridFieldOrderableRows::handleReorder)
@@ -986,6 +1019,9 @@ class GridFieldGroupable
      */
     public function handleGroupCreate($grid, $request)
     {
+        # CSRF: checked before anything else, so a forged request learns nothing (#18)
+        $this->checkSecurityToken($grid, $request);
+
         // Only supported in DataObject mode
         if (!$this->isDataObjectMode()) {
             return json_encode([
@@ -1124,6 +1160,9 @@ class GridFieldGroupable
      */
     public function handleGroupReorder($grid, $request)
     {
+        # CSRF: checked before anything else, so a forged request learns nothing (#18)
+        $this->checkSecurityToken($grid, $request);
+
         // Only supported in DataObject mode with sort field
         if (!$this->isDataObjectMode()) {
             return json_encode([
@@ -1257,6 +1296,9 @@ class GridFieldGroupable
      */
     public function handleGroupAction($grid, $request)
     {
+        # CSRF: checked before anything else, so a forged request learns nothing (#18)
+        $this->checkSecurityToken($grid, $request);
+
         // Only supported in DataObject mode
         if (!$this->isDataObjectMode()) {
             return json_encode([
@@ -1355,6 +1397,9 @@ class GridFieldGroupable
      */
     public function handleGroupDelete($grid, $request)
     {
+        # CSRF: checked before anything else, so a forged request learns nothing (#18)
+        $this->checkSecurityToken($grid, $request);
+
         // Only supported in DataObject mode
         if (!$this->isDataObjectMode()) {
             return json_encode([
@@ -1552,6 +1597,9 @@ class GridFieldGroupable
      */
     public function handleGroupTitleUpdate($grid, $request)
     {
+        # CSRF: checked before anything else, so a forged request learns nothing (#18)
+        $this->checkSecurityToken($grid, $request);
+
         // Only supported in DataObject mode
         if (!$this->isDataObjectMode()) {
             return json_encode([

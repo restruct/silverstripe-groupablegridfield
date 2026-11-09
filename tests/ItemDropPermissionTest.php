@@ -89,6 +89,8 @@ class ItemDropPermissionTest extends SapphireTest
             'groupable_item_id' => (string) $Item->ID,
             'groupable_group_key' => 'sec_b',
         ]);
+        # with the form's CSRF token in the header groupable.js sends it in (#18)
+        $request->addHeader('X-SecurityID', $grid->getForm()->getSecurityToken()->getValue());
 
         try {
             $groupable->handleGroupAssignment($grid, $request);

@@ -1,5 +1,34 @@
 # Changelog
 
+## 4.1.1 (unreleased)
+
+### Security
+
+- **The group endpoints now check the form's CSRF token** (#18). `group_create`, `group_delete`,
+  `group_title_update`, `group_reorder`, `group_action` and `group_assignment` checked `canEdit()`
+  but not the form's `SecurityID`, so only the session cookie's `SameSite=Lax` default kept a
+  cross-site POST from creating, deleting, renaming or reordering groups as a logged-in editor.
+  Each endpoint now answers 400 (core's CSRF message) before it does anything, the way core's own
+  GridField actions do, unless the request carries the token of the form the grid is in. A form
+  that disabled its token (`disableSecurityToken()`) is not checked, as in core.
+  `client/js/groupable.js` sends the token in the `X-SecurityID` header with every group request;
+  drags already sent it with the form data.
+
+### Removed
+
+- `client/css/groupable.scss` and `client/css/groupable.css.map` (#19). `groupable.css` is the
+  stylesheet the module loads and has been edited directly since 2026-02; the SCSS still held the
+  2025 rules only, so compiling it would have dropped the DataObject-mode styles (titles, actions,
+  metadata, the add-group dialog). The map pointed at that old build and the CSS no longer
+  referenced it. Nothing in the module compiled either file. The one rule the SCSS had disabled
+  (`background-color: #dae2e7` on divider cells) is kept as a comment in the CSS.
+
+### Changed
+
+- Code of your own that posts to a group endpoint (a custom script, or a copy of
+  `groupable.js`) must send the form's `SecurityID`, as the `SecurityID` request variable or the
+  `X-SecurityID` header, or it gets a 400.
+
 ## 4.1.0 (2026-10-11)
 
 ### Fixed

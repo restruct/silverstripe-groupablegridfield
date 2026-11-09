@@ -70,6 +70,8 @@ class BoundaryDragPermissionTest extends SapphireTest
                 'Sections' => ['key' => ['sec_a', 'sec_z'], 'val' => ['Alpha', 'Injected']],
             ],
         ]);
+        # with the form's CSRF token in the header groupable.js sends it in (#18)
+        $request->addHeader('X-SecurityID', $grid->getForm()->getSecurityToken()->getValue());
         $groupable->handleGroupAssignment($grid, $request);
     }
 
