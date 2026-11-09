@@ -81,6 +81,8 @@ class GroupReorderTest extends SapphireTest
         $request = new HTTPRequest('POST', 'group_reorder', [], [
             'group_order' => [(string) $Two->ID, (string) $One->ID],
         ]);
+        # with the form's CSRF token in the header groupable.js sends it in (#18)
+        $request->addHeader('X-SecurityID', $grid->getForm()->getSecurityToken()->getValue());
         $response = json_decode($groupable->handleGroupReorder($grid, $request), true);
 
         $this->assertTrue($response['success'], $response['message'] ?? '');
