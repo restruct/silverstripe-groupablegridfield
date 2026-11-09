@@ -1,6 +1,6 @@
 # Changelog
 
-## 4.1.1 (unreleased)
+## 4.1.1 (2026-11-09)
 
 ### Security
 
